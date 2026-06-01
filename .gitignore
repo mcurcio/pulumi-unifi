@@ -1,0 +1,37 @@
+# --- Go ---
+# Compiled binaries / plugin output
+/bin/
+pulumi-resource-unifi
+pulumi-gen-unifi
+*.exe
+*.test
+*.out
+vendor/
+
+# --- Pulumi ---
+Pulumi.*.yaml
+.pulumi/
+
+# --- Python (generated SDK + local envs) ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- Secrets / local config ---
+# Never commit a real UniFi API key.
+*.env
+.env.*
+!.env.example
+
+# --- Editor / OS ---
+.DS_Store
+.idea/
+.vscode/
