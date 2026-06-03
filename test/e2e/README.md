@@ -29,11 +29,21 @@ solved (both flagged in the compose file):
 
 ## TLS
 
-The controller serves self-signed TLS. The provider framework has **no insecure
-hook** (`allowInsecure` is unimplemented for the MVP), so the test process must
-trust the controller CA via `SSL_CERT_FILE` — the same mechanism the Tier-1 mock
-uses. Export the controller's CA cert during provisioning and point `SSL_CERT_FILE`
-at it.
+The controller serves self-signed TLS. Two trust paths exist:
+
+- **`allowInsecure=true`** (implemented, Phase 4 — `transport.go`): skips TLS
+  verification. This is how the Tier-1 mock tier trusts its self-signed cert, and
+  it works on Linux and macOS alike.
+- **CA-pinned (`allowInsecure=false`, the production default):** the provider
+  trusts the controller CA through the OS trust store. On Linux Go's default
+  transport honors `SSL_CERT_FILE`; on macOS it verifies against the keychain and
+  ignores `SSL_CERT_FILE`.
+
+This Tier-2 e2e exists specifically to verify the **CA-pinned** path live (the
+unique value over Tier-1, which uses `allowInsecure`). Export the controller's CA
+cert during provisioning and point `SSL_CERT_FILE` at it (Linux), or trust it in
+the keychain (macOS). The no-Docker partial of this is
+`securetls_test.go` (E-M4.3).
 
 ## Running (once provisioned)
 

@@ -35,7 +35,8 @@ Notes for codegen (see provider/pkg/gen/openapi_fixes.go)
   absolute "https://<host>/proxy/network/integration" so the framework's base URL
   (Servers[0].URL) is usable.
 - components.securitySchemes is ABSENT — FixOpenAPIDoc injects an apiKey scheme
-  (in: header, name: X-API-Key) so the framework derives the auth header name and
-  pulschema emits the apiKey provider config.
+  (in: header, name: X-API-Key) so the framework derives the auth header name.
+  The apiKey provider config property is hand-authored in packagespec.go, not
+  derived from the scheme.
 
 Refresh with ./fetch.sh (re-verifies the checksum above).

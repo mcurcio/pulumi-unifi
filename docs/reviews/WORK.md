@@ -34,12 +34,12 @@ has the detail, grouped by track (= owner = parallel lane).
 | S0.2 | Gen post-process pass pipeline + migrate coalesce | 0 | 0 | M | — | ☑ |
 | S0.3 | Split `gen/schema.go` identity vs orchestration (single-source config) | 0 | 0 | S/M | before A-M0.2 | ☑ |
 | S0.4 | Promote passes to `pkg/gen/genpass` sub-package _(deferred)_ | 0 | 2 | S | ≈6 passes exist | ☐ |
-| QW-1 | `version.go` package doc | QW | 1 | S | — | ☐ |
+| QW-1 | `version.go` package doc | QW | 1 | S | — | ☑ |
 | QW-2 | De-dup `Config`↔`InputProperties` → **folded into S0.3** | QW | 0 | — | — | ☑ |
 | QW-3 | Drop duplicate `"unifi"` keyword | QW | 1 | S | before A-M0.2 | ☑ |
 | QW-4 | Mark voucher `code` secret | QW | 1 | S | before A-M0.2 | ☑ |
-| QW-5 | Fix DESIGN §7 PluginDownloadURL + §6 apiKey claim | QW | 1 | S | — | ☐ |
-| QW-6 | Update stale `test/e2e/README.md` | QW | 1 | S | — | ☐ |
+| QW-5 | Fix DESIGN §7 PluginDownloadURL + §6 apiKey claim | QW | 1 | S | — | ☑ |
+| QW-6 | Update stale `test/e2e/README.md` | QW | 1 | S | — | ☑ |
 | A-M0.2 | Token-set golden + `drift_test.go` | A | 1 | M | S0.3, QW-3/4 (baseline after) | ☑ |
 | A-M0.3 | `excludedPaths` existence + dup-token guard | A | 1 | S | A-M0.2 | ☑ |
 | A-M0.4 | Determinism gate → all 4 artifacts | A | 1 | S/M | — | ☑ |
