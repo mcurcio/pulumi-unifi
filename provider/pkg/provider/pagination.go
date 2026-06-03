@@ -32,8 +32,8 @@ const maxPagesFallback = 10000
 // captured handler until the full collection is assembled. Every other body
 // shape (naked arrays, single objects) returns nil to defer to the framework's
 // own output conversion.
-func (p *unifiProvider) OnPostInvoke(ctx context.Context, req *pulumirpc.InvokeRequest, outputs interface{}) (map[string]interface{}, error) {
-	first, ok := outputs.(map[string]interface{})
+func (p *unifiProvider) OnPostInvoke(ctx context.Context, req *pulumirpc.InvokeRequest, outputs any) (map[string]any, error) {
+	first, ok := outputs.(map[string]any)
 	if !ok {
 		return nil, nil
 	}
@@ -59,7 +59,7 @@ func (p *unifiProvider) OnPostInvoke(ctx context.Context, req *pulumirpc.InvokeR
 		return nil, fmt.Errorf("unmarshaling invoke args for pagination: %w", err)
 	}
 
-	fetch := func(offset, limit int) (map[string]interface{}, error) {
+	fetch := func(offset, limit int) (map[string]any, error) {
 		httpReq, err := p.handler.CreateGetRequest(ctx, readPath, args, nil)
 		if err != nil {
 			return nil, fmt.Errorf("creating paginated get request: %w", err)
@@ -75,10 +75,13 @@ func (p *unifiProvider) OnPostInvoke(ctx context.Context, req *pulumirpc.InvokeR
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
+			// Best-effort error context, bounded: a misbehaving controller (or a
+			// MITM on the insecure path) could return a multi-MB body, so cap the
+			// read at 4 KiB. The discarded ReadAll error is intentional.
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 			return nil, fmt.Errorf("paginated get %s returned %s: %s", readPath, resp.Status, string(body))
 		}
-		var page map[string]interface{}
+		var page map[string]any
 		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
 			return nil, fmt.Errorf("decoding paginated response: %w", err)
 		}
@@ -105,7 +108,7 @@ func (p *unifiProvider) OnPostInvoke(ctx context.Context, req *pulumirpc.InvokeR
 //
 // The empty-page terminator still bounds a server that reports a totalCount it
 // never fills.
-func aggregatePages(ctx context.Context, first map[string]interface{}, fetch func(offset, limit int) (map[string]interface{}, error)) (map[string]interface{}, error) {
+func aggregatePages(ctx context.Context, first map[string]any, fetch func(offset, limit int) (map[string]any, error)) (map[string]any, error) {
 	all := toSlice(first["data"])
 	total, hasTotal := toInt(first["totalCount"])
 
@@ -145,15 +148,15 @@ func aggregatePages(ctx context.Context, first map[string]interface{}, fetch fun
 }
 
 // toSlice returns v as a JSON array, or nil if it is not one. A decoded JSON
-// body yields []interface{} for arrays.
-func toSlice(v interface{}) []interface{} {
-	s, _ := v.([]interface{})
+// body yields []any for arrays.
+func toSlice(v any) []any {
+	s, _ := v.([]any)
 	return s
 }
 
 // toInt returns v as an int when it is a JSON number. encoding/json decodes
-// numbers into float64 when unmarshaling into interface{}.
-func toInt(v interface{}) (int, bool) {
+// numbers into float64 when unmarshaling into any.
+func toInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case float64:
 		return int(n), true

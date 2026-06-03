@@ -27,19 +27,14 @@ func (p *unifiProvider) OnConfigure(_ context.Context, req *pulumirpc.ConfigureR
 		inputs = p.handler.GetSchemaSpec().Provider.InputProperties
 	}
 
-	apiKey, ok := vars[p.name+":config:apiKey"]
-	if !ok || apiKey == "" {
-		apiKey = firstEnv(inputs["apiKey"].DefaultInfo)
-	}
+	apiKey := p.configValue(vars, inputs, "apiKey")
 	if apiKey == "" {
 		return nil, errors.New("a UniFi API key is required (set unifi:apiKey or the UNIFI_APIKEY env var)")
 	}
 	p.apiKey = apiKey
 
-	if siteID, ok := vars[p.name+":config:siteId"]; ok && siteID != "" {
+	if siteID := p.configValue(vars, inputs, "siteId"); siteID != "" {
 		p.siteID = siteID
-	} else if envSiteID := firstEnv(inputs["siteId"].DefaultInfo); envSiteID != "" {
-		p.siteID = envSiteID
 	}
 
 	// Validate apiHost. The framework does a raw `baseURL.Host = apiHost`, so a
@@ -48,24 +43,22 @@ func (p *unifiProvider) OnConfigure(_ context.Context, req *pulumirpc.ConfigureR
 	// We read apiHost the same way the framework does (config var, then env) so
 	// the two never disagree. A single "/" check covers both "scheme://" and a
 	// trailing path.
-	apiHost, ok := vars[p.name+":config:apiHost"]
-	if !ok || apiHost == "" {
-		apiHost = firstEnv(inputs["apiHost"].DefaultInfo)
-	}
+	apiHost := p.configValue(vars, inputs, "apiHost")
 	if strings.Contains(apiHost, "/") {
 		return nil, fmt.Errorf("apiHost %q must be a bare host or host:port (no scheme, no path), e.g. \"192.168.1.1\" or \"unifi.example.com:443\"", apiHost)
 	}
 
 	// allowInsecure opts into skipping TLS verification (self-signed controller
 	// certs on a trusted network). Pulumi serializes config bools as "true"/
-	// "false" strings; an unparseable/absent value leaves verification on.
-	allowInsecureStr, ok := vars[p.name+":config:allowInsecure"]
-	if !ok || allowInsecureStr == "" {
-		allowInsecureStr = firstEnv(inputs["allowInsecure"].DefaultInfo)
+	// "false" strings; an absent value leaves verification on, and an unparseable
+	// non-empty value is logged (fail-secure but not silent) so a typo'd setting
+	// does not look like it took effect.
+	allowInsecureStr := p.configValue(vars, inputs, "allowInsecure")
+	b, err := strconv.ParseBool(allowInsecureStr)
+	if err != nil && allowInsecureStr != "" {
+		logging.V(3).Infof("ignoring unparseable allowInsecure=%q (%v); TLS verification stays on", allowInsecureStr, err)
 	}
-	if b, err := strconv.ParseBool(allowInsecureStr); err == nil {
-		p.allowInsecure = b
-	}
+	p.allowInsecure = err == nil && b
 	if p.allowInsecure && p.handler != nil {
 		injectInsecureTransport(p.handler.GetHTTPClient())
 		logging.V(3).Info("TLS certificate verification disabled (allowInsecure=true)")
@@ -76,6 +69,17 @@ func (p *unifiProvider) OnConfigure(_ context.Context, req *pulumirpc.ConfigureR
 	return &pulumirpc.ConfigureResponse{
 		AcceptSecrets: true,
 	}, nil
+}
+
+// configValue resolves one provider config key: the Pulumi config variable
+// (unifi:config:<key>) if set and non-empty, else the schema-declared env-var
+// fallback (firstEnv over the key's DefaultInfo). Collapses the per-key
+// var-then-env dance so all four keys resolve uniformly.
+func (p *unifiProvider) configValue(vars map[string]string, inputs map[string]pschema.PropertySpec, key string) string {
+	if v, ok := vars[p.name+":config:"+key]; ok && v != "" {
+		return v
+	}
+	return firstEnv(inputs[key].DefaultInfo)
 }
 
 // firstEnv returns the value of the first set environment variable named by a

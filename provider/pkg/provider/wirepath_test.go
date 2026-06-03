@@ -59,7 +59,7 @@ func TestWirePath(t *testing.T) {
 		// A complete (empty) page envelope: OnPostInvoke sees data+totalCount,
 		// finds the set already complete (0 >= 0) and issues no follow-up GET,
 		// returning a map — so the framework never reaches its non-:list
-		// type-assert to map[string]interface{}. The body is just a stub to keep
+		// type-assert to map[string]any. The body is just a stub to keep
 		// Invoke from erroring; this test asserts on the request, not the result.
 		_, _ = w.Write([]byte(`{"count":0,"data":[],"limit":25,"offset":0,"totalCount":0}`))
 	}))

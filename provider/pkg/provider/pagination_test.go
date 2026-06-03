@@ -7,11 +7,11 @@ import (
 )
 
 // rows builds a slice of n opaque page items labeled by index, mimicking the
-// shape json.Unmarshal into interface{} produces (each row a map).
-func rows(start, end int) []interface{} {
-	out := make([]interface{}, 0, end-start)
+// shape json.Unmarshal into any produces (each row a map).
+func rows(start, end int) []any {
+	out := make([]any, 0, end-start)
 	for i := start; i < end; i++ {
-		out = append(out, map[string]interface{}{"id": float64(i)})
+		out = append(out, map[string]any{"id": float64(i)})
 	}
 	return out
 }
@@ -19,7 +19,7 @@ func rows(start, end int) []interface{} {
 // TestAggregatePagesSinglePage: when the first page already holds totalCount
 // rows, no follow-up GET is issued and the envelope is returned reconciled.
 func TestAggregatePagesSinglePage(t *testing.T) {
-	first := map[string]interface{}{
+	first := map[string]any{
 		"data":       rows(0, 2),
 		"totalCount": float64(2),
 		"count":      float64(2),
@@ -27,7 +27,7 @@ func TestAggregatePagesSinglePage(t *testing.T) {
 		"limit":      float64(25),
 	}
 	fetched := false
-	fetch := func(offset, limit int) (map[string]interface{}, error) {
+	fetch := func(offset, limit int) (map[string]any, error) {
 		fetched = true
 		return nil, errors.New("should not fetch when first page is complete")
 	}
@@ -51,17 +51,17 @@ func TestAggregatePagesSinglePage(t *testing.T) {
 // GET must request offset=len(all-so-far) and limit=listPageLimit, and the rows
 // concatenate in order until totalCount is reached.
 func TestAggregatePagesMultiPage(t *testing.T) {
-	first := map[string]interface{}{
+	first := map[string]any{
 		"data":       rows(0, 2),
 		"totalCount": float64(5),
 	}
-	pages := []map[string]interface{}{
+	pages := []map[string]any{
 		{"data": rows(2, 4)},
 		{"data": rows(4, 5)},
 	}
 	var gotOffsets, gotLimits []int
 	idx := 0
-	fetch := func(offset, limit int) (map[string]interface{}, error) {
+	fetch := func(offset, limit int) (map[string]any, error) {
 		gotOffsets = append(gotOffsets, offset)
 		gotLimits = append(gotLimits, limit)
 		p := pages[idx]
@@ -79,7 +79,7 @@ func TestAggregatePagesMultiPage(t *testing.T) {
 		t.Fatalf("data len = %d, want 5", len(data))
 	}
 	for i, item := range data {
-		if id, _ := toInt(item.(map[string]interface{})["id"]); id != i {
+		if id, _ := toInt(item.(map[string]any)["id"]); id != i {
 			t.Errorf("data[%d].id = %d, want %d (order not preserved)", i, id, i)
 		}
 	}
@@ -104,17 +104,17 @@ func TestAggregatePagesMultiPage(t *testing.T) {
 // TestAggregatePagesEmptyPageTerminates: a server that reports a totalCount it
 // never fills must not loop forever — an empty page ends aggregation.
 func TestAggregatePagesEmptyPageTerminates(t *testing.T) {
-	first := map[string]interface{}{
+	first := map[string]any{
 		"data":       rows(0, 2),
 		"totalCount": float64(10), // lies; server returns no more rows
 	}
 	calls := 0
-	fetch := func(offset, limit int) (map[string]interface{}, error) {
+	fetch := func(offset, limit int) (map[string]any, error) {
 		calls++
 		if calls > 3 {
 			t.Fatalf("aggregatePages did not terminate on empty page (%d calls)", calls)
 		}
-		return map[string]interface{}{"data": []interface{}{}}, nil
+		return map[string]any{"data": []any{}}, nil
 	}
 
 	out, err := aggregatePages(context.Background(), first, fetch)
@@ -128,11 +128,11 @@ func TestAggregatePagesEmptyPageTerminates(t *testing.T) {
 
 // TestAggregatePagesFetchError: a fetch failure aborts and propagates.
 func TestAggregatePagesFetchError(t *testing.T) {
-	first := map[string]interface{}{
+	first := map[string]any{
 		"data":       rows(0, 2),
 		"totalCount": float64(10),
 	}
-	fetch := func(offset, limit int) (map[string]interface{}, error) {
+	fetch := func(offset, limit int) (map[string]any, error) {
 		return nil, errors.New("boom")
 	}
 
@@ -144,16 +144,16 @@ func TestAggregatePagesFetchError(t *testing.T) {
 // TestAggregatePagesMissingTotalCount: with no totalCount, aggregation runs to
 // the empty-page terminator and backfills totalCount from the assembled set.
 func TestAggregatePagesMissingTotalCount(t *testing.T) {
-	first := map[string]interface{}{
+	first := map[string]any{
 		"data": rows(0, 2),
 	}
 	// No totalCount key, so toInt(first["totalCount"]) is (0,false) -> loop.
-	pages := []map[string]interface{}{
+	pages := []map[string]any{
 		{"data": rows(2, 3)},
-		{"data": []interface{}{}},
+		{"data": []any{}},
 	}
 	idx := 0
-	fetch := func(offset, limit int) (map[string]interface{}, error) {
+	fetch := func(offset, limit int) (map[string]any, error) {
 		p := pages[idx]
 		idx++
 		return p, nil
@@ -179,14 +179,14 @@ func TestAggregatePagesKnownTotalCeiling(t *testing.T) {
 	// total is not a clean multiple of listPageLimit, so the assembled count can
 	// overshoot total in one append; the ceiling still bounds the fetch count.
 	const total = 3*listPageLimit + 1
-	first := map[string]interface{}{
+	first := map[string]any{
 		"data":       rows(0, 1),
 		"totalCount": float64(total),
 	}
 	calls := 0
-	fetch := func(offset, limit int) (map[string]interface{}, error) {
+	fetch := func(offset, limit int) (map[string]any, error) {
 		calls++
-		return map[string]interface{}{"data": rows(0, listPageLimit)}, nil // offset ignored
+		return map[string]any{"data": rows(0, listPageLimit)}, nil // offset ignored
 	}
 	if _, err := aggregatePages(context.Background(), first, fetch); err != nil {
 		t.Fatalf("aggregatePages: %v", err)
@@ -200,14 +200,14 @@ func TestAggregatePagesKnownTotalCeiling(t *testing.T) {
 // totalCount, a server returning non-empty pages forever must still stop —
 // bounded by maxPagesFallback — rather than loop/OOM indefinitely.
 func TestAggregatePagesNoTotalCeiling(t *testing.T) {
-	first := map[string]interface{}{
+	first := map[string]any{
 		"data": rows(0, 1),
 		// no totalCount
 	}
 	calls := 0
-	fetch := func(offset, limit int) (map[string]interface{}, error) {
+	fetch := func(offset, limit int) (map[string]any, error) {
 		calls++
-		return map[string]interface{}{"data": rows(offset, offset+1)}, nil // never empty
+		return map[string]any{"data": rows(offset, offset+1)}, nil // never empty
 	}
 	if _, err := aggregatePages(context.Background(), first, fetch); err != nil {
 		t.Fatalf("aggregatePages: %v", err)
@@ -221,7 +221,7 @@ func TestAggregatePagesNoTotalCeiling(t *testing.T) {
 // context aborts the loop on the next iteration with the context error, rather
 // than continuing to fetch.
 func TestAggregatePagesContextCancelled(t *testing.T) {
-	first := map[string]interface{}{
+	first := map[string]any{
 		"data":       rows(0, 2),
 		"totalCount": float64(1000),
 	}
@@ -229,9 +229,9 @@ func TestAggregatePagesContextCancelled(t *testing.T) {
 	cancel() // already cancelled before the first iteration
 
 	fetched := false
-	fetch := func(offset, limit int) (map[string]interface{}, error) {
+	fetch := func(offset, limit int) (map[string]any, error) {
 		fetched = true
-		return map[string]interface{}{"data": rows(offset, offset+2)}, nil
+		return map[string]any{"data": rows(offset, offset+2)}, nil
 	}
 
 	_, err := aggregatePages(ctx, first, fetch)
@@ -262,10 +262,10 @@ func TestToInt(t *testing.T) {
 
 // TestToSlice covers array vs non-array inputs.
 func TestToSlice(t *testing.T) {
-	if got := toSlice([]interface{}{1, 2}); len(got) != 2 {
+	if got := toSlice([]any{1, 2}); len(got) != 2 {
 		t.Errorf("toSlice(array) len = %d, want 2", len(got))
 	}
-	if got := toSlice(map[string]interface{}{}); got != nil {
+	if got := toSlice(map[string]any{}); got != nil {
 		t.Errorf("toSlice(map) = %v, want nil", got)
 	}
 	if got := toSlice(nil); got != nil {
