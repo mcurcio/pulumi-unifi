@@ -19,7 +19,8 @@ Verification bar: `make build` + `make test` (no Docker) green. Pure refactors
 
 ### Wave 1
 
-- A-M0.3 | ☑ | 59e905d | added two guards to drift_test.go: TestExcludedPathsResolve (every excludedPaths entry resolves against the sanitized+fixed doc via doc.Paths.Find — dead-exclusion guard) and TestNoDuplicateShortTokenNames (no duplicate short names within the resource or function token set — variant-collision guard). excludedPaths guard sanity-checked RED with a bogus entry then reverted; dup-detection logic verified RED on a synthetic collision. make test green.
+- A-M0.3 | ☑ | 2f48500 | added two guards to drift_test.go: TestExcludedPathsResolve (every excludedPaths entry resolves against the sanitized+fixed doc via doc.Paths.Find — dead-exclusion guard) and TestNoDuplicateShortTokenNames (no duplicate short names within the resource or function token set — variant-collision guard). excludedPaths guard sanity-checked RED with a bogus entry then reverted; dup-detection logic verified RED on a synthetic collision. make test green.
+- A-M0.4 | ☑ | <am04sha> | extended runPipeline + TestPipelineDeterministic to the third in-process artifact (openapi_generated.yml via yaml.Marshal of the pulschema-updated doc), so nondeterminism in the OpenAPI doc now fails the default gate too. The fourth artifact (Python SDK, out-of-process gen-sdk) is covered by the CI double-generate + git-diff step landing in A-M0.1. Determinism green.
 
 ## CHECKPOINT — Wave 0 → Wave 1 boundary
 
