@@ -118,3 +118,28 @@ descriptions:
     # Batch/action RPCs modeled as resources (D-M3.3) — documented honestly.
     Voucher: "Generates a batch of UniFi hotspot guest vouchers. NOTE: this is a batch-generate action, not a declarative resource: `count` controls how many vouchers are created at once and the generated codes are returned as outputs; updating `count` does not reconcile an existing batch and `pulumi destroy` revokes the generated vouchers. Treat each apply as a one-shot generation."
     AdoptDevice: "Adopts UniFi device(s) into the site. NOTE: this is an imperative action, not a declarative resource: it triggers device adoption by MAC address; there is no in-place update, and `pulumi destroy` unadopts (removes) the device. Models the official API's POST /devices adopt action."
+
+# enums pins the canonical NAME for a merged enum family (pass_enum.go, D-M2.7).
+# pulschema emits one enum type per operation/variant the spec duplicates, so the
+# same closed value set surfaces under several tokens (ACLRuleAction /
+# ACLRuleObjectAction / ACLRuleUpdateAction = ["ALLOW","BLOCK"]; ConnectionState…
+# vs FirewallPolicyConnectionState…; IpsecFilter vs FirewallPolicyIpsecFilter; …).
+# The engine merges every family that shares a module + underlying type + value
+# set into ONE type and rewrites all refs. The canonical name is editorial: the
+# engine derives a default (the shortest member's short name; ties → alphabetical)
+# and these entries pin the exceptions where that default is too generic. Keyed by
+# the engine's derived default short name → the chosen short name (kept in-module).
+#
+# Numeric-enum preservation (broadcastingFrequenciesGHz etc., 03-F9) is OUT OF
+# SCOPE here — deferred upstream to pulschema numeric-enum support (G-U3).
+enums:
+  canonicalRename:
+    # The 10-value device adoption/connection-state enum's shortest member is the
+    # bare `State` — too generic/collision-prone for a public type. Pin to a
+    # descriptive name.
+    State: DeviceState
+    # The TCP/UDP protocol-filter enum's shortest member is the awkward
+    # `Ipv4PropertiesProtocolFilterItem` (the other candidate is worse:
+    # GetIntegrationIpAclRuleDtoPropertiesProtocolFilterItem). Pin to the neutral
+    # entity-free name.
+    Ipv4PropertiesProtocolFilterItem: ProtocolFilterItem

@@ -51,12 +51,21 @@ type descriptionMappings struct {
 	Functions map[string]string `yaml:"functions"`
 }
 
+// enumMappings is the enum-dedup editorial layer. The engine merges
+// structurally-identical enums and derives a default canonical name (the shortest
+// member); CanonicalRename pins the exceptions where that default is too generic,
+// keyed by the derived default short name → the chosen short name.
+type enumMappings struct {
+	CanonicalRename map[string]string `yaml:"canonicalRename"`
+}
+
 // mappingsFile is the parsed shape of mappings.yaml: the whole editorial layer.
 type mappingsFile struct {
 	ExcludedPaths []string            `yaml:"excludedPaths"`
 	Resources     resourceMappings    `yaml:"resources"`
 	Functions     functionMappings    `yaml:"functions"`
 	Descriptions  descriptionMappings `yaml:"descriptions"`
+	Enums         enumMappings        `yaml:"enums"`
 }
 
 var (
@@ -138,5 +147,13 @@ func resourceDescriptionOverride(short string) (string, bool) {
 // short name, and whether one exists.
 func functionDescriptionOverride(short string) (string, bool) {
 	v, ok := loadMappings().Descriptions.Functions[short]
+	return v, ok
+}
+
+// enumCanonicalRename returns the pinned canonical short name for a merged enum
+// family whose engine-derived default short name is defaultShort, and whether a
+// pin exists. Absent → the engine keeps its derived default.
+func enumCanonicalRename(defaultShort string) (string, bool) {
+	v, ok := loadMappings().Enums.CanonicalRename[defaultShort]
 	return v, ok
 }

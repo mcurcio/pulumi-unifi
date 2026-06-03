@@ -107,6 +107,13 @@ var passes = []pass{
 	// after token-rename (which deliberately leaves *Page tokens alone) so the
 	// list tokens are settled before descriptions annotates them.
 	{name: "depage", fn: depagePass},
+	// Type cleanup: dedup structurally-identical enums to one canonical type
+	// (rewriting refs in lockstep) and prune unreferenced empty types. Operates on
+	// the final Types graph, so it runs after the structural/naming passes that may
+	// add or rename type refs (depage trims page types; nothing after this adds
+	// enums). Touches Pkg.Types + type refs only — orthogonal to descriptions
+	// (top-level Description) and mark-secret-fields (property Secret).
+	{name: "enum-cleanup", fn: enumCleanupPass},
 	// Annotation: synthesize a top-level Description for every resource + function.
 	// Runs after the renames so override keys match the final token names; keys off
 	// the spec operation summary (or a mappings.yaml override), so it is robust to
