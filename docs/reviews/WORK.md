@@ -40,7 +40,7 @@ has the detail, grouped by track (= owner = parallel lane).
 | QW-4 | Mark voucher `code` secret | QW | 1 | S | before A-M0.2 | ☑ |
 | QW-5 | Fix DESIGN §7 PluginDownloadURL + §6 apiKey claim | QW | 1 | S | — | ☐ |
 | QW-6 | Update stale `test/e2e/README.md` | QW | 1 | S | — | ☐ |
-| A-M0.2 | Token-set golden + `drift_test.go` | A | 1 | M | S0.3, QW-3/4 (baseline after) | ☐ |
+| A-M0.2 | Token-set golden + `drift_test.go` | A | 1 | M | S0.3, QW-3/4 (baseline after) | ☑ |
 | A-M0.3 | `excludedPaths` existence + dup-token guard | A | 1 | S | A-M0.2 | ☐ |
 | A-M0.4 | Determinism gate → all 4 artifacts | A | 1 | S/M | — | ☐ |
 | A-M0.5 | `info.version` ↔ pin assertion | A | 1 | S | — | ☐ |
