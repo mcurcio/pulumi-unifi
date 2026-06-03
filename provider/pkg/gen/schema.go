@@ -88,7 +88,15 @@ func rawMessage(v interface{}) pschema.RawMessage {
 // ordering and is independently testable. Document the rationale for any new
 // pass's position when appending here.
 var passes = []pass{
+	// Structural/CRUD repair first, so later naming passes see a coalesced,
+	// fully-bound resource set.
 	{name: "coalesce-discriminated-crud", fn: coalesceDiscriminatedCRUDPass},
+	// Inject the discriminator const while tokens still carry their pulschema
+	// names (ToPascalCase(discriminatorValue)) — discriminatorInjectPass inverts
+	// that naming to recover each variant's value, so it must run BEFORE the token
+	// rename re-prefixes the tokens. It reads the spec discriminator mapping, not
+	// the token, but matches on the token short name, so order matters.
+	{name: "discriminator-inject", fn: discriminatorInjectPass},
 	{name: "mark-secret-fields", fn: markSecretFieldsPass},
 }
 
