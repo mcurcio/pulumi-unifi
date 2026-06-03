@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"sort"
-	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 
@@ -139,10 +138,12 @@ func PulumiSchema(openAPIDoc openapi3.T) (pschema.PackageSpec, openapigen.Provid
 		contract.Failf("generating resources from OpenAPI spec: %v", err)
 	}
 
-	// pulschema binds only the create verb to each discriminated-variant resource
-	// token; coalesce the remaining CRUD from the shared item path and prune the
-	// orphan keys it leaves behind. See coalesceDiscriminatedCRUD.
-	coalesceDiscriminatedCRUD(providerMetadata, updatedOpenAPIDoc, pkg)
+	// Run the ordered post-process passes over the shared GenState. pulschema's
+	// output needs deterministic repair/polish (e.g. discriminated-variant CRUD
+	// coalescing); each pass mutates the same Pkg/Meta/Doc in place. The order is
+	// significant — see runPasses.
+	state := &GenState{Pkg: &pkg, Meta: providerMetadata, Doc: &updatedOpenAPIDoc}
+	runPasses(state)
 
 	pkg.Language["python"] = rawMessage(pythongen.PackageInfo{
 		PackageName: "pulumi_unifi",
@@ -173,107 +174,26 @@ func rawMessage(v interface{}) pschema.RawMessage {
 	return out.Bytes()
 }
 
-// coalesceDiscriminatedCRUD repairs the create-only resource stubs pulschema
-// emits for discriminated entities, and prunes the orphan crudMap keys it leaves
-// behind.
-//
-// pulschema splits each oneOf+discriminator request body into one Pulumi
-// resource per variant (e.g. a Wi-Fi broadcast becomes Standard + IotOptimized),
-// but binds only the POST (create) verb to each variant token; the entity's
-// GET/PATCH/PUT/DELETE verbs are keyed under separate per-verb schema tokens. A
-// variant resource can therefore be created but has no read/update/delete
-// endpoint, so it dies on the next `pulumi up` with "resource read endpoint is
-// unknown". 18 of the 21 generated resources are such create-only stubs.
-//
-// The repair is mechanical and spec-driven. A collection POST path P_coll has a
-// single canonical item path P_coll + "/{param}" carrying that entity's
-// GET/PATCH/PUT/DELETE; the discriminator rides in the request body, so the item
-// path is shared by — and correct for — every variant. Phase 1 fills any missing
-// R/U/D/P on each resource token from that item path's verbs, never overwriting a
-// verb pulschema already bound (so the 3 already-complete resources are
-// untouched, and a verb the spec does not expose stays nil).
-//
-// Phase 2 prunes orphan crudMap keys: entries bound to neither a live resource
-// nor a function token (pulschema's per-verb …CreateUpdateDto and singular-base
-// shadow tokens). They are inert on the read path but a wrong-endpoint hazard
-// once writes dispatch on resource tokens.
-//
-// Deterministic: a token's fill depends only on its own C and the spec, and a
-// prune depends only on token-set membership — both independent of map iteration
-// order — so schema.json/metadata.json stay byte-identical run to run
-// (TestPipelineDeterministic). Keys are iterated sorted regardless.
-func coalesceDiscriminatedCRUD(meta *openapigen.ProviderMetadata, doc openapi3.T, pkg pschema.PackageSpec) {
-	crudMap := meta.ResourceCRUDMap
-
-	excluded := make(map[string]bool, len(excludedPaths))
-	for _, p := range excludedPaths {
-		excluded[p] = true
-	}
-
-	// Phase 1: fill missing item-level verbs onto resource tokens from the
-	// collection's canonical item path.
-	for _, tok := range sortedKeys(crudMap) {
-		if _, isResource := pkg.Resources[tok]; !isResource {
-			continue // functions are read-only; only resources need full CRUD
-		}
-		m := crudMap[tok]
-		if m == nil || m.C == nil {
-			continue
-		}
-		itemPath := findItemPath(doc, *m.C, excluded)
-		if itemPath == "" {
-			continue
-		}
-		item := doc.Paths.Find(itemPath)
-		if item == nil {
-			continue
-		}
-		if m.R == nil && item.Get != nil {
-			m.R = strPtr(itemPath)
-		}
-		if m.U == nil && item.Patch != nil {
-			m.U = strPtr(itemPath)
-		}
-		if m.D == nil && item.Delete != nil {
-			m.D = strPtr(itemPath)
-		}
-		if m.P == nil && item.Put != nil {
-			m.P = strPtr(itemPath)
-		}
-	}
-
-	// Phase 2: prune orphan keys that bind to no live token.
-	for _, tok := range sortedKeys(crudMap) {
-		_, isResource := pkg.Resources[tok]
-		_, isFunction := pkg.Functions[tok]
-		if !isResource && !isFunction {
-			delete(crudMap, tok)
-		}
-	}
+// passes is the ordered list of post-pulschema transforms, run in sequence over
+// a shared GenState. Order is significant: structural/CRUD repair runs first, so
+// later naming/pruning/annotation passes (added by Track D) see a coalesced,
+// fully-bound resource set. Each pass is named for logging + deterministic
+// ordering and is independently testable. Document the rationale for any new
+// pass's position when appending here.
+var passes = []pass{
+	{name: "coalesce-discriminated-crud", fn: coalesceDiscriminatedCRUDPass},
 }
 
-// findItemPath returns the canonical item path for a collection path: the unique
-// sibling of the form collPath + "/{param}" (exactly one more path-parameter
-// segment). Grandchildren (collPath + "/{param}/...") and excluded paths are not
-// item paths. Returns "" when none exists. Sorted iteration keeps the result
-// deterministic even in the (unexpected) case of multiple matches.
-func findItemPath(doc openapi3.T, collPath string, excluded map[string]bool) string {
-	prefix := collPath + "/"
-	for _, p := range sortedKeys(doc.Paths.Map()) {
-		if excluded[p] || !strings.HasPrefix(p, prefix) {
-			continue
-		}
-		if seg := p[len(prefix):]; isSinglePathParamSegment(seg) {
-			return p
+// runPasses applies every registered pass to state in order. A pass returning an
+// error is a codegen-time defect (the spec or an upstream assumption changed), so
+// it aborts the build loudly via contract.Failf — the correct idiom for the
+// build-time codegen path.
+func runPasses(state *GenState) {
+	for _, p := range passes {
+		if err := p.fn(state); err != nil {
+			contract.Failf("gen pass %q: %v", p.name, err)
 		}
 	}
-	return ""
-}
-
-// isSinglePathParamSegment reports whether s is exactly one "{param}" path
-// segment: brace-wrapped, non-empty, with no nested "/".
-func isSinglePathParamSegment(s string) bool {
-	return len(s) > 2 && s[0] == '{' && s[len(s)-1] == '}' && !strings.Contains(s, "/")
 }
 
 // sortedKeys returns a map's string keys in sorted order, for deterministic
@@ -286,7 +206,3 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(keys)
 	return keys
 }
-
-// strPtr returns a pointer to a fresh copy of s, so each crudMap verb field
-// holds its own backing string (mirroring pulschema's per-verb &path).
-func strPtr(s string) *string { return &s }

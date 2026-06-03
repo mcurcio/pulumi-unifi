@@ -31,7 +31,7 @@ has the detail, grouped by track (= owner = parallel lane).
 | ID | Title | Track | Wave | Effort | Depends on | Status |
 |---|---|---|---|---|---|---|
 | S0.1 | Split `pkg/provider` by responsibility | 0 | 0 | M | pairs with B-M1.2 | ☑ |
-| S0.2 | Gen post-process pass pipeline + migrate coalesce | 0 | 0 | M | — | ☐ |
+| S0.2 | Gen post-process pass pipeline + migrate coalesce | 0 | 0 | M | — | ☑ |
 | S0.3 | Split `gen/schema.go` identity vs orchestration (single-source config) | 0 | 0 | S/M | before A-M0.2 | ☐ |
 | S0.4 | Promote passes to `pkg/gen/genpass` sub-package _(deferred)_ | 0 | 2 | S | ≈6 passes exist | ☐ |
 | QW-1 | `version.go` package doc | QW | 1 | S | — | ☐ |
