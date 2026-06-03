@@ -102,6 +102,11 @@ var passes = []pass{
 	// Naming polish: entity-prefix the context-free variant tokens and normalize
 	// function names. Runs after the discriminator value is recovered.
 	{name: "token-rename", fn: tokenRenamePass},
+	// De-page the auto-aggregated list data sources: rename get<Entity>Page →
+	// list<Entities> and drop the now-meaningless limit/offset paging knobs. Runs
+	// after token-rename (which deliberately leaves *Page tokens alone) so the
+	// list tokens are settled before descriptions annotates them.
+	{name: "depage", fn: depagePass},
 	// Annotation: synthesize a top-level Description for every resource + function.
 	// Runs after the renames so override keys match the final token names; keys off
 	// the spec operation summary (or a mappings.yaml override), so it is robust to

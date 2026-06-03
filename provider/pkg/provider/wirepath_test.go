@@ -117,7 +117,7 @@ func TestWirePath(t *testing.T) {
 	})
 
 	t.Run("siteId substituted on the wire", func(t *testing.T) {
-		invoke(t, "unifi:sites/v1:getWifiBroadcastPage")
+		invoke(t, "unifi:sites/v1:listWifiBroadcasts")
 		mu.Lock()
 		defer mu.Unlock()
 		const wantSuffix = "/v1/sites/default/wifi/broadcasts"

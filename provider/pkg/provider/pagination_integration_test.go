@@ -19,7 +19,7 @@ import (
 // paginatedDataSource is a site-scoped list data source whose read path is a
 // page envelope ({data,totalCount}) — the shape OnPostInvoke aggregates. It is
 // the same token TestWirePath exercises.
-const paginatedDataSource = "unifi:sites/v1:getWifiBroadcastPage"
+const paginatedDataSource = "unifi:sites/v1:listWifiBroadcasts"
 
 // newProviderAgainst wires a real provider+framework stack at the httptest TLS
 // server, trusting its self-signed cert via allowInsecure=true. Shared shape

@@ -36,7 +36,7 @@ const mockReadDataSource = "unifi:countries/v1:getCountry"
 // parameter is substituted over the wire (a successful decode means
 // /v1/sites/<mockSiteID>/wifi/broadcasts matched a Prism route — an unsubstituted
 // {siteId} would 404), and the page envelope flows through OnPostInvoke (A4).
-const mockSiteScopedDataSource = "unifi:sites/v1:getWifiBroadcastPage"
+const mockSiteScopedDataSource = "unifi:sites/v1:listWifiBroadcasts"
 
 // mockSiteID is the {siteId} the mock tier configures. The spec types siteId as
 // format:uuid and Prism enforces it on the path param, so the provider's real
