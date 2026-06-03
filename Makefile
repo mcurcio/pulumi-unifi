@@ -22,7 +22,7 @@ BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: ensure fetch gen generate_schema python_sdk generate build install test test-mock clean
+.PHONY: ensure fetch gen generate_schema python_sdk generate build install test test-mock test-sdk clean
 
 MOCK_COMPOSE := test/mock/docker-compose.yml
 
@@ -83,5 +83,15 @@ test-mock:: build
 		docker compose -f $(MOCK_COMPOSE) down; \
 		exit $$status
 
+# Python SDK smoke test: regenerate the SDK, install it (+ pulumi + pytest) into
+# a throwaway venv, and assert pulumi_unifi imports with its stable class set
+# (incl. a discriminated variant). The test source lives in test/sdk/ (outside
+# the gitignored sdk/ tree that python_sdk regenerates).
+test-sdk:: python_sdk
+	python3 -m venv $(WORKING_DIR)/.sdkvenv
+	$(WORKING_DIR)/.sdkvenv/bin/pip install -q --upgrade pip
+	$(WORKING_DIR)/.sdkvenv/bin/pip install -q pytest pulumi ./sdk/python
+	$(WORKING_DIR)/.sdkvenv/bin/python -m pytest test/sdk/test_smoke.py -q
+
 clean::
-	rm -rf $(BIN)
+	rm -rf $(BIN) $(WORKING_DIR)/.sdkvenv

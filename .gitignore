@@ -33,6 +33,7 @@ build/
 dist/
 .venv/
 venv/
+.sdkvenv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
