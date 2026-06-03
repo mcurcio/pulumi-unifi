@@ -136,3 +136,7 @@ to the saved baseline; tokens.txt golden UNCHANGED; make build + make test +
 go test -race ./... green; go vet + gofmt -l clean; double make generate_schema →
 3 artifacts byte-identical; make test-mock (Docker healthy) → read + write dispatch
 smoke PASS.
+
+## Track-D Phase 2 — coordinator-driven (one implementor per pass)
+- D-M2.4 `108a57e` descriptions — committed by prior run; status flipped here.
+- D-M2.5 `d40e276` de-page — prior run wrote pass_depage.go; coordinator finished it (added pass_depage_test.go, rebased golden, `go mod tidy`), verified: unit gate green, golden 16 get*Page->list* renames, `make test-mock` green (first run hit the known Caddy/Prism startup race; green on ready stack).
