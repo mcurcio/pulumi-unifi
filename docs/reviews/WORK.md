@@ -33,6 +33,7 @@ has the detail, grouped by track (= owner = parallel lane).
 | S0.1 | Split `pkg/provider` by responsibility | 0 | 0 | M | pairs with B-M1.2 | ☑ |
 | S0.2 | Gen post-process pass pipeline + migrate coalesce | 0 | 0 | M | — | ☑ |
 | S0.3 | Split `gen/schema.go` identity vs orchestration (single-source config) | 0 | 0 | S/M | before A-M0.2 | ☑ |
+| S0.5 | Mapping-data layer: `mappings.yaml` + loader (externalize editorial maps) | 0 | 2 | M | D-M2.1/2.3 (inventory done); before Phase-2 | ☐ |
 | S0.4 | Promote passes to `pkg/gen/genpass` sub-package _(deferred)_ | 0 | 2 | S | ≈6 passes exist | ☐ |
 | QW-1 | `version.go` package doc | QW | 1 | S | — | ☑ |
 | QW-2 | De-dup `Config`↔`InputProperties` → **folded into S0.3** | QW | 0 | — | — | ☑ |
@@ -215,6 +216,20 @@ to tagged-union resources (part of G-U1's design space) — hard to change post-
 - **Deliver:** once ≈6 `pass_*.go` files exist, move them to `pkg/gen/genpass` for navigability,
   exporting the `GenState` contract.
 - **Accept:** do **not** do this preemptively; trigger only when the file count crosses the threshold.
+
+#### S0.5 — Mapping-data layer: `mappings.yaml` + loader · Wave 2 · M
+- **Source:** maintainer directive ([MAPPING-LAYER.md](MAPPING-LAYER.md)) — editorial api→pulumi
+  mappings must be **data, not code**, for cross-UniFi-version stability.
+- **Deliver:** a declarative `mappings.yaml` (the public-API contract) + a loader; migrate the four
+  Go-literal maps the Track-D Phase-1 passes added — `entityPrefixes` (5), `irregularSingulars` (3),
+  `acronymFixups` (1), `explicitFunctionRenames` (3) — into it, plus the discriminator config, and fold
+  `excludedPaths` in. The passes become a generic engine that reads the data; derive-by-default,
+  pin-by-exception. (Schema design questions in MAPPING-LAYER.md §"Open design questions".)
+- **Accept:** zero naming/const/plural/exclusion literals remain in Go; `make generate` byte-identical
+  before/after the migration (pure refactor — golden unchanged); a new entity with no mapping that
+  isn't cleanly derivable fails **loud** ("unmapped entity").
+- **Sequence:** do **before** Track-D Phase 2 (D-M2.4…D-M3.3) so those passes are data-driven from the
+  start (their immutable-fields + description-overrides land in `mappings.yaml` too).
 
 ### Track A — Safety net & CI _(prerequisite lane)_
 
