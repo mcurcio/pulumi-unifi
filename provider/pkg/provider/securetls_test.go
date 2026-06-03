@@ -80,6 +80,6 @@ func TestSecureTLSPathTrustsCAviaSSLCertFile(t *testing.T) {
 	}
 
 	// The CA-trusted handshake must succeed with verification on.
-	out := invokeDataSource(t, rp, "unifi:countries/v1:getCountrie")
+	out := invokeDataSource(t, rp, "unifi:countries/v1:getCountry")
 	_ = out // a non-error Invoke is the success signal; body is an empty stub
 }

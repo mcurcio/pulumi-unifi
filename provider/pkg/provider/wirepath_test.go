@@ -108,7 +108,7 @@ func TestWirePath(t *testing.T) {
 	}
 
 	t.Run("x-api-key on the wire", func(t *testing.T) {
-		invoke(t, "unifi:countries/v1:getCountrie")
+		invoke(t, "unifi:countries/v1:getCountry")
 		mu.Lock()
 		defer mu.Unlock()
 		if gotKey != apiKey {

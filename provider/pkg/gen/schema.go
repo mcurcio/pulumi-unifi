@@ -97,6 +97,9 @@ var passes = []pass{
 	// rename re-prefixes the tokens. It reads the spec discriminator mapping, not
 	// the token, but matches on the token short name, so order matters.
 	{name: "discriminator-inject", fn: discriminatorInjectPass},
+	// Naming polish: entity-prefix the context-free variant tokens and normalize
+	// function names. Runs after the discriminator value is recovered.
+	{name: "token-rename", fn: tokenRenamePass},
 	{name: "mark-secret-fields", fn: markSecretFieldsPass},
 }
 

@@ -46,7 +46,7 @@ docker compose -f test/mock/docker-compose.yml down
 ## Coverage split
 
 End-to-end through the provider, this tier proves **URL composition + live TLS +
-JSON decode** for both a no-`siteId` data source (`getCountrie`) and a `sites/v1` one
+JSON decode** for both a no-`siteId` data source (`getCountry`) and a `sites/v1` one
 (`getWifiBroadcastPage`, so a configured `{siteId}` is substituted over the wire — a
 uuid, because the spec types `siteId` as `format:uuid` and Prism enforces it, so the
 controller's `default` alias would 422 here), plus **write dispatch** —

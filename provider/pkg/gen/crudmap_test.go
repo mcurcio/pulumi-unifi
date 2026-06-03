@@ -185,15 +185,17 @@ func TestDiscriminatedResourcesHaveFullCRUD(t *testing.T) {
 
 	// Tokens that carried only C before B1, grouped by the entity (comment) whose
 	// item path their CRUD coalesces onto. The discriminator rides in the request
-	// body, so every variant of an entity shares one item path.
+	// body, so every variant of an entity shares one item path. These are the
+	// post-rename (D-M2.2) tokens — entity-prefixed — since this runs the full
+	// pipeline.
 	formerStubs := []string{
-		"unifi:sites/v1:Standard", "unifi:sites/v1:IotOptimized", // wifi/broadcasts
-		"unifi:sites/v1:Gateway", "unifi:sites/v1:Switch", "unifi:sites/v1:Unmanaged", // networks
-		"unifi:sites/v1:ARecord", "unifi:sites/v1:AaaaRecord", "unifi:sites/v1:CnameRecord",
-		"unifi:sites/v1:MxRecord", "unifi:sites/v1:SrvRecord", "unifi:sites/v1:TxtRecord",
-		"unifi:sites/v1:ForwardDomain",              // dns/policies
-		"unifi:sites/v1:Ipv4", "unifi:sites/v1:Mac", // acl-rules
-		"unifi:sites/v1:Ipv4Addresses", "unifi:sites/v1:Ipv6Addresses", "unifi:sites/v1:Ports", // traffic-matching-lists
+		"unifi:sites/v1:WifiBroadcastStandard", "unifi:sites/v1:WifiBroadcastIotOptimized", // wifi/broadcasts
+		"unifi:sites/v1:ManagedNetworkGateway", "unifi:sites/v1:ManagedNetworkSwitch", "unifi:sites/v1:ManagedNetworkUnmanaged", // networks
+		"unifi:sites/v1:DnsARecord", "unifi:sites/v1:DnsAaaaRecord", "unifi:sites/v1:DnsCnameRecord",
+		"unifi:sites/v1:DnsMxRecord", "unifi:sites/v1:DnsSrvRecord", "unifi:sites/v1:DnsTxtRecord",
+		"unifi:sites/v1:DnsForwardDomain",                                   // dns/policies
+		"unifi:sites/v1:TrafficMatchIpv4", "unifi:sites/v1:TrafficMatchMac", // acl-rules
+		"unifi:sites/v1:TrafficMatchIpv4Addresses", "unifi:sites/v1:TrafficMatchIpv6Addresses", "unifi:sites/v1:TrafficMatchPorts", // traffic-matching-lists
 	}
 
 	for _, tok := range formerStubs {
@@ -229,7 +231,7 @@ func TestDiscriminatedResourcesHaveFullCRUD(t *testing.T) {
 	// The wifi/broadcasts item path also exposes PUT, so its variants must gain P
 	// — proving PUT (not just GET/DELETE) coalesces. This is the metadata behind
 	// the plan's `jq '.crudMap["…:Standard"] | keys' == ["c","d","p","r"]` check.
-	for _, tok := range []string{"unifi:sites/v1:Standard", "unifi:sites/v1:IotOptimized"} {
+	for _, tok := range []string{"unifi:sites/v1:WifiBroadcastStandard", "unifi:sites/v1:WifiBroadcastIotOptimized"} {
 		m := meta.ResourceCRUDMap[tok]
 		if m == nil || m.P == nil || !isItemPath(*m.P) {
 			var got string

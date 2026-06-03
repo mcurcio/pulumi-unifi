@@ -29,7 +29,7 @@ import (
 // mockReadDataSource is the data-source token exercised against the mock. Its
 // read endpoint (/v1/countries) takes no path params beyond the server base, so
 // it isolates URL composition + TLS + decode without siteId concerns.
-const mockReadDataSource = "unifi:countries/v1:getCountrie"
+const mockReadDataSource = "unifi:countries/v1:getCountry"
 
 // mockSiteScopedDataSource is a site-scoped page DTO. Reading it through the
 // mock proves two things the countries control cannot: the {siteId} path
