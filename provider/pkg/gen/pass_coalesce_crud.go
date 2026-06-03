@@ -60,7 +60,10 @@ func coalesceDiscriminatedCRUDPass(s *GenState) error {
 			continue
 		}
 
-		itemPath := findItemPath(doc, *m.C, excluded)
+		itemPath, err := findItemPath(doc, *m.C, excluded)
+		if err != nil {
+			return fmt.Errorf("resolving item path for resource %q: %w", tok, err)
+		}
 		if itemPath != "" {
 			if item := doc.Paths.Find(itemPath); item != nil {
 				if m.R == nil && item.Get != nil {
@@ -104,19 +107,32 @@ func coalesceDiscriminatedCRUDPass(s *GenState) error {
 // findItemPath returns the canonical item path for a collection path: the unique
 // sibling of the form collPath + "/{param}" (exactly one more path-parameter
 // segment). Grandchildren (collPath + "/{param}/...") and excluded paths are not
-// item paths. Returns "" when none exists. Sorted iteration keeps the result
-// deterministic even in the (unexpected) case of multiple matches.
-func findItemPath(doc *openapi3.T, collPath string, excluded map[string]bool) string {
+// item paths. Returns "" when none exists.
+//
+// More than one single-param sibling is an ambiguity error (C-M1.4 / 06-F10):
+// the old behavior silently picked the sorted-first, but on a spec bump that
+// adds a second single-{param} sub-collection under a writable entity, picking
+// arbitrarily would bind CRUD to the wrong endpoint. Surface it loudly instead.
+// Sorted iteration keeps the (single-match) result deterministic regardless.
+func findItemPath(doc *openapi3.T, collPath string, excluded map[string]bool) (string, error) {
 	prefix := collPath + "/"
+	var matches []string
 	for _, p := range sortedKeys(doc.Paths.Map()) {
 		if excluded[p] || !strings.HasPrefix(p, prefix) {
 			continue
 		}
 		if seg := p[len(prefix):]; isSinglePathParamSegment(seg) {
-			return p
+			matches = append(matches, p)
 		}
 	}
-	return ""
+	switch len(matches) {
+	case 0:
+		return "", nil
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("collection %q has %d single-param item siblings %v; cannot pick the canonical item path unambiguously (add the non-item ones to excludedPaths)", collPath, len(matches), matches)
+	}
 }
 
 // isSinglePathParamSegment reports whether s is exactly one "{param}" path

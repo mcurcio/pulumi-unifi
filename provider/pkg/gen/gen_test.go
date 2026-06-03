@@ -154,6 +154,77 @@ func TestFixOpenAPIDocRewritesServer(t *testing.T) {
 	}
 }
 
+// TestFixOpenAPIDocRejectsExistingSecurity is the C-M1.4 auth guard: a spec that
+// already declares a securityScheme (or top-level security) must error rather
+// than silently layering the injected X-API-Key scheme on top.
+func TestFixOpenAPIDocRejectsExistingSecurity(t *testing.T) {
+	t.Run("existing scheme", func(t *testing.T) {
+		doc := &openapi3.T{
+			OpenAPI: "3.1.0",
+			Info:    &openapi3.Info{Title: "t", Version: "1"},
+			Paths:   openapi3.NewPaths(),
+			Components: &openapi3.Components{
+				SecuritySchemes: openapi3.SecuritySchemes{
+					"Existing": &openapi3.SecuritySchemeRef{Value: &openapi3.SecurityScheme{Type: "http", Scheme: "bearer"}},
+				},
+			},
+		}
+		if err := FixOpenAPIDoc(doc); err == nil {
+			t.Error("expected an error when the spec already declares a securityScheme")
+		}
+	})
+	t.Run("existing top-level security", func(t *testing.T) {
+		doc := &openapi3.T{
+			OpenAPI:  "3.1.0",
+			Info:     &openapi3.Info{Title: "t", Version: "1"},
+			Paths:    openapi3.NewPaths(),
+			Security: openapi3.SecurityRequirements{openapi3.SecurityRequirement{"Foo": []string{}}},
+		}
+		if err := FixOpenAPIDoc(doc); err == nil {
+			t.Error("expected an error when the spec already declares top-level security")
+		}
+	})
+}
+
+// TestFixOpenAPIDocRejectsUnexpectedServer is the C-M1.4 server guard: a spec
+// whose server is not the expected relative "/integration" must error rather
+// than silently overwriting a (possibly versioned) base path.
+func TestFixOpenAPIDocRejectsUnexpectedServer(t *testing.T) {
+	doc := &openapi3.T{
+		OpenAPI: "3.1.0",
+		Info:    &openapi3.Info{Title: "t", Version: "1"},
+		Paths:   openapi3.NewPaths(),
+		Servers: openapi3.Servers{&openapi3.Server{URL: "/v2/integration"}},
+	}
+	if err := FixOpenAPIDoc(doc); err == nil {
+		t.Error("expected an error for an unexpected server URL (base path may have moved)")
+	}
+}
+
+// TestFindItemPathAmbiguity is the C-M1.4 item-path guard: a collection with two
+// single-{param} item siblings is ambiguous and must error, instead of silently
+// picking the sorted-first.
+func TestFindItemPathAmbiguity(t *testing.T) {
+	const coll = "/v1/sites/{siteId}/things"
+	doc := &openapi3.T{Paths: openapi3.NewPaths()}
+	doc.Paths.Set(coll+"/{id}", &openapi3.PathItem{})
+	doc.Paths.Set(coll+"/{otherId}", &openapi3.PathItem{})
+
+	if _, err := findItemPath(doc, coll, map[string]bool{}); err == nil {
+		t.Error("expected an ambiguity error for two single-param item siblings")
+	}
+
+	// With one excluded, the remaining single match resolves cleanly.
+	excluded := map[string]bool{coll + "/{otherId}": true}
+	got, err := findItemPath(doc, coll, excluded)
+	if err != nil {
+		t.Fatalf("findItemPath: %v", err)
+	}
+	if got != coll+"/{id}" {
+		t.Errorf("findItemPath = %q, want %q", got, coll+"/{id}")
+	}
+}
+
 // TestEnsureSchemaTitles confirms every title-less component schema gets a unique
 // title equal to its key, the fix that makes discriminated-getter naming stable.
 func TestEnsureSchemaTitles(t *testing.T) {
