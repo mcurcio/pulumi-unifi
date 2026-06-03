@@ -3,7 +3,22 @@ module github.com/mcurcio/pulumi-unifi/provider
 go 1.26
 
 require (
+	// pulschema: OpenAPI→Pulumi schema + CRUD endpoint map; auto-derives resource
+	// grouping and splits oneOf+discriminator bodies into per-variant resources
+	// (binding only create per variant — see pass_coalesce_crud.go). Untagged
+	// pseudo-version: the grouping/splitting/getter-naming/CRUD-binding behavior
+	// this provider depends on can change between commits. On bump, re-verify the
+	// token golden (testdata/tokens.txt) and that the coalesce pass is still
+	// needed (TestCoalesceStillNeeded). The long-term fix (full-CRUD discriminated
+	// binding) is upstream PR G-U1.
 	github.com/cloudy-sky-software/pulschema v0.0.0-20260425162045-4f93ef0f7fdc
+	// pulumi-provider-framework: the generic Go HTTP CRUD runtime (the plugin
+	// binary) that executes metadata.json. Untagged pseudo-version: derives the
+	// auth header from the security scheme, swaps only the server host at runtime,
+	// and exposes GetHTTPClient() (used by transport.go/pagination.go). On bump,
+	// re-verify allowInsecure transport injection and the pagination
+	// CreateGetRequest path still work. Upstream PRs that shrink our surface:
+	// G-U2/U4/U5.
 	github.com/cloudy-sky-software/pulumi-provider-framework v0.0.0-20260425164420-ac1778da4c41
 	github.com/getkin/kin-openapi v0.136.0
 	github.com/pulumi/pulumi/pkg/v3 v3.230.0

@@ -33,6 +33,51 @@ func runPipelineTyped(t *testing.T) (pschema.PackageSpec, openapigen.ProviderMet
 	return pkg, metadata
 }
 
+// runPulschemaRaw runs pulschema's GatherResourcesFromAPI on the fixed spec
+// WITHOUT this package's post-process passes, so a test can observe pulschema's
+// unrepaired output (in particular the create-only discriminated stubs the
+// coalesce pass exists to fix). It mirrors PulumiSchema's setup minus runPasses.
+func runPulschemaRaw(t *testing.T) (pschema.PackageSpec, *openapigen.ProviderMetadata) {
+	t.Helper()
+	doc := fixedDoc(t)
+	pkg := packageSpec()
+	openAPICtx := &openapigen.OpenAPIContext{
+		Doc:           *doc,
+		Pkg:           &pkg,
+		ExcludedPaths: excludedPaths,
+	}
+	meta, _, err := openAPICtx.GatherResourcesFromAPI(map[string]string{
+		packageName: "Unifi",
+		"":          "Provider",
+	})
+	if err != nil {
+		t.Fatalf("GatherResourcesFromAPI: %v", err)
+	}
+	return pkg, meta
+}
+
+// TestCoalesceStillNeeded asserts the coalesce pass is not yet redundant: raw
+// pulschema (pre-pass) still emits at least one discriminated-variant resource
+// bound to create only (C set, R nil). If an upstream pulschema fix (PR G-U1)
+// starts binding full CRUD per variant, every resource will arrive with R set,
+// this test fails, and that failure is the signal that pass_coalesce_crud.go can
+// be deleted. (A-M0.8 / 06-F7.)
+func TestCoalesceStillNeeded(t *testing.T) {
+	pkg, meta := runPulschemaRaw(t)
+
+	createOnly := 0
+	for tok := range pkg.Resources {
+		m := meta.ResourceCRUDMap[tok]
+		if m != nil && m.C != nil && m.R == nil {
+			createOnly++
+		}
+	}
+	if createOnly == 0 {
+		t.Error("no create-only resource stubs from raw pulschema — the coalesce pass (pass_coalesce_crud.go) may now be redundant; if upstream G-U1 landed, delete it and rebase the golden")
+	}
+	t.Logf("raw pulschema emits %d create-only resource stubs (coalesce pass still needed)", createOnly)
+}
+
 // itemPathRE matches a REST item-level path: one ending in a single
 // "/{param}" segment (e.g. /v1/sites/{siteId}/firewall/policies/{id}). A
 // collection path ends in a literal segment.
