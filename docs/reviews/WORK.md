@@ -54,9 +54,9 @@ has the detail, grouped by track (= owner = parallel lane).
 | B-M1.6 | Pagination page-size from spec `limit.maximum` | B | 2 | M | S0.1, metadata capture | ☐ |
 | C-M1.4 | Loud-on-changed-assumptions guards (auth/server/itempath) | C | 1 | S | — | ☑ |
 | C-M1.5 | kin-openapi `Validate()` after the fix layer | C | 1 | S | — | ☑ |
-| D-M2.1 | `pass_discriminator.go` — const/default, drop required | D | 2 | M | S0.2, A-M0.2 | ☐ |
-| D-M2.2 | `pass_token_rename.go` — entity-prefix variant tokens | D | 2 | M | S0.2, A-M0.2 | ☐ |
-| D-M2.3 | `pass_token_rename.go` — normalization (Dto/singular/case/get-list) | D | 2 | M/L | D-M2.2 (same file) | ☐ |
+| D-M2.1 | `pass_discriminator.go` — const/default, drop required | D | 2 | M | S0.2, A-M0.2 | ☑ |
+| D-M2.2 | `pass_token_rename.go` — entity-prefix variant tokens | D | 2 | M | S0.2, A-M0.2 | ☑ |
+| D-M2.3 | `pass_token_rename.go` — normalization (Dto/singular/case/get-list) | D | 2 | M/L | D-M2.2 (same file) | ☑ |
 | D-M2.4 | `pass_descriptions.go` — synthesize descriptions | D | 2 | M | S0.2, A-M0.2 | ☐ |
 | D-M2.5 | `pass_depage.go` — de-pageify list data sources | D | 2 | M | S0.2, A-M0.2 | ☐ |
 | D-M2.6 | `pass_prune_getters.go` — prune redundant DTO getters | D | 2 | S/M | S0.2, A-M0.2 | ☐ |

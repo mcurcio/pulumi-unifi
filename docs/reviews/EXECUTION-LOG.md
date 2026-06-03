@@ -82,3 +82,22 @@ STOPPED (left for human decision / out of scope, per the brief):
   F-M5.1/5.2/5.3 (release), Track G (external repos), A-M0.2′ (re-baseline post-D).
 - `make test-mock` — Docker daemon UNHEALTHY in this environment; the trap fix
   (F-M5.4) and the mock-tier smoke run are deferred until Docker is healthy.
+
+## Track-D slice 1 — discriminator const + token rename (UX-defining; STOP for review)
+
+First slice of Track D per docs/reviews/TRACK-D-DECISION.md (shape (b): per-variant
++ polish, in deterministic codegen). Two new passes appended after coalesce, before
+secret-fields (order: coalesce → discriminator-inject → token-rename → secret).
+Docker now HEALTHY → `make test-mock` run for real.
+
+- D-M2.1 | ☑ | 801924a | pass_discriminator.go: discriminatorInjectPass removes the redundant required discriminator (type/management) from every split-variant resource. Derivation is the exact INVERSE of pulschema's own naming — pulschema names each variant token `ToPascalCase(discriminatorValue)` (openapi.go), so the pass reads each resource's create (collection POST) body discriminator (propertyName + mapping), matches the value whose ToPascalCase == token short name, then pins that input property to Const+Default=value and drops it from requiredInputs (framework injects it on the wire). 100% spec-derived, zero hardcoded values. Flat resources (no POST-body discriminator: FirewallZone/FirewallPolicy/Voucher/AdoptDevice) skipped untouched; an unmatchable variant is a loud error. IMPORTANT finding: contrary to the brief's caveat, WiFi Standard/IotOptimized DO have derivable discriminator values (STANDARD/IOT_OPTIMIZED from "Wifi broadcast create or update") — all 17 discriminated resources got a derived const, none were un-derivable. Generated SDK confirms `type`/`management` now optional and hard-set to the const (e.g. dns_a_record.py: `if type is None: type='A_RECORD'` then `pulumi.set(...,'A_RECORD')`). 5 tests incl. RED-when-broken (const-skip → integration test fails) then reverted.
+- D-M2.2 + D-M2.3 | ☑ | 466943d | pass_token_rename.go (naming = one responsibility = one file). (a) D-M2.2: entity-prefix the 17 context-free variant resource tokens — Standard→WifiBroadcastStandard, ARecord→DnsARecord, Gateway→ManagedNetworkGateway, Mac→TrafficMatchMac, Ipv4Addresses→TrafficMatchIpv4Addresses, etc. Prefix keyed off the resource's create (collection) path via the small declarative `entityPrefixes` table (analogous to excludedPaths), guarded so a flat resource sharing a collection is never mis-prefixed. (b) D-M2.3: normalize 26 function tokens by string transform — strip Integration prefix + Dto suffix (getIntegrationDnsARecordDto→getDnsARecord ×15), PascalCase snake fragments + acronym fixups (getGateway_managed_network_details→getGatewayManagedNetworkDetails, getVPN_…→getVpn…), repair irregular singulars from a one-place exceptions table (getCountrie→getCountry, getDpiApplicationCategorie→getDpiApplicationCategory), and settle the F5 near-duplicate get/list pairs via a small explicit table (listTrafficMatching→getTrafficMatchingList, listTrafficMatchings→listTrafficMatchingLists, getFirewallPolicie→listFirewallPolicies). `*Page` list tokens left untouched (D-M2.5's job). renameToken moves the token across Pkg.Resources/Functions + Meta.ResourceCRUDMap + Meta.AutoNameMap in lockstep; collisions are loud errors. Golden rebased: exactly 43 added / 43 removed = 21 res + 50 fn unchanged count, pure 1:1 renames, nothing dropped/added. crudmap_test (formerStubs + PUT-coalesce list) and the 3 provider mock tests (getCountrie→getCountry) updated to the new tokens (no weakened assertions). 4 tests incl. RED-when-broken (no-prefix → fails) then reverted.
+
+Verification: `make build` + `make test` + `go test -race ./...` + `go vet` +
+`gofmt -l` all green; `make generate_schema` twice → byte-identical (3 artifacts);
+`make test-mock` (Docker healthy) → read + write dispatch smoke PASS (an initial
+502 was a Caddy/Prism startup race, not a token break — confirmed green on rerun
+and against a warm stack; no crudMap key was broken by the renames). `make
+python_sdk` regenerated; reference shapes captured for the orchestrator review.
+
+STOP for human UX review of the produced shape before D-M2.4..2.7 / D-M3.* proceed.
