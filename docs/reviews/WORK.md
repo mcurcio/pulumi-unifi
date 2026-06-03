@@ -69,7 +69,7 @@ has the detail, grouped by track (= owner = parallel lane).
 | E-M4.5 | Python SDK smoke test | E | 1 | S | — | ☑ |
 | E-M4.3 | Verify CA-pinned secure TLS path | E | 1→3 | M | partial now; live needs E-M4.1 | ◐ |
 | E-M4.2 | Live variant CRUD round-trip (throwaway SSID) | E | 3 | M/L | E-M4.1, Track D | ☐ |
-| F-M5.4 | `make test-mock` teardown trap | F | 1 | S | — | ☐ |
+| F-M5.4 | `make test-mock` teardown trap | F | 1 | S | — | ☑ |
 | F-M5.1 | Release workflow + clean-machine auto-install smoke | F | 1→3 | M | finalize after D | ☐ |
 | F-M5.2 | Version wiring fix (dead flag / schema version / SDK ver) | F | 3 | M | — | ☐ |
 | F-M5.3 | Pin/record required `pulumi` CLI version | F | 3 | S | — | ☐ |

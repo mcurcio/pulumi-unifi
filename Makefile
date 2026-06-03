@@ -74,14 +74,17 @@ test:: $(SPEC)
 # read- and write-dispatch tests, tears down regardless of outcome. The tests
 # trust the mock's self-signed cert via allowInsecure=true (Caddy still serves
 # real TLS); the CA-pinned secure path is a Tier-2 (test/e2e/) concern.
+#
+# Bring-up + run + teardown are one shell block with `trap … EXIT`, so the stack
+# is torn down even when `up --wait` itself fails (F-M5.4) — previously the down
+# was welded to the test command's exit and a bring-up failure left it up.
 test-mock:: build
 	./test/mock/gen-certs.sh
-	docker compose -f $(MOCK_COMPOSE) up -d --wait
+	set -e; \
+	trap 'docker compose -f $(MOCK_COMPOSE) down' EXIT; \
+	docker compose -f $(MOCK_COMPOSE) up -d --wait; \
 	UNIFI_MOCK_ADDR=127.0.0.1:8443 \
-		go -C provider test -tags integration -count=1 -run 'TestReadPathAgainstMock|TestWritePathAgainstMock' ./pkg/provider/; \
-		status=$$?; \
-		docker compose -f $(MOCK_COMPOSE) down; \
-		exit $$status
+		go -C provider test -tags integration -count=1 -run 'TestReadPathAgainstMock|TestWritePathAgainstMock' ./pkg/provider/
 
 # Python SDK smoke test: regenerate the SDK, install it (+ pulumi + pytest) into
 # a throwaway venv, and assert pulumi_unifi imports with its stable class set
