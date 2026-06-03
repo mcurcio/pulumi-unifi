@@ -67,7 +67,7 @@ has the detail, grouped by track (= owner = parallel lane).
 | E-M4.1 | Tier-2 provisioning (UniFi OS Server + key mint) | E | 1 | L | — | ☐ |
 | E-M4.4 | `OnPostInvoke` multi-page `httptest` | E | 1 | S/M | S0.1 | ☑ |
 | E-M4.5 | Python SDK smoke test | E | 1 | S | — | ☐ |
-| E-M4.3 | Verify CA-pinned secure TLS path | E | 1→3 | M | partial now; live needs E-M4.1 | ☐ |
+| E-M4.3 | Verify CA-pinned secure TLS path | E | 1→3 | M | partial now; live needs E-M4.1 | ◐ |
 | E-M4.2 | Live variant CRUD round-trip (throwaway SSID) | E | 3 | M/L | E-M4.1, Track D | ☐ |
 | F-M5.4 | `make test-mock` teardown trap | F | 1 | S | — | ☐ |
 | F-M5.1 | Release workflow + clean-machine auto-install smoke | F | 1→3 | M | finalize after D | ☐ |
