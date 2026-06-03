@@ -58,3 +58,27 @@ the golden baseline. `make build` + `make test` + `go test -race` + `go vet` +
 - F-M5.4 | ☑ | 8e036b6 | rewrote the test-mock recipe as a single shell block: `set -e; trap 'docker compose ... down' EXIT; up --wait; <go test>`. Teardown is now unconditional even when `up --wait` itself fails (previously the down was welded to the test command's exit, so a bring-up failure left the stack up). DOCKER CAVEAT: daemon UNHEALTHY here so the recipe was not executed; verified via `make -n test-mock` expansion + `bash -n` syntax check of the trap block. Full run deferred until Docker is healthy.
 - QW-1 + QW-5 + QW-6 | ☑ | e038a65 | QW-1: replaced version.go's blanket `// nolint: revive` with a real package doc (build/vet/gofmt clean). QW-5: DESIGN §7 now accurately describes the github:// PluginDownloadURL scheme (Pulumi computes the asset name; no ${OS}/${ARCH} template); DESIGN §6 + openapi/SOURCE corrected — the apiKey config property is hand-authored in packagespec.go, not emitted by pulschema from the scheme (the scheme only names the auth header). QW-6: test/e2e/README.md TLS section rewritten — allowInsecure is implemented (Phase 4); the e2e's unique value is the CA-pinned allowInsecure=false path, with securetls_test.go as the no-Docker partial. Docs/comment-only; no code behavior change.
 - A-M0.1 | ☑ | 722ec37 | added .github/workflows/ci.yml with 4 jobs: (test) gofmt -l + go vet + `make test` with CI=true so codegen tests fail-not-skip on a missing spec; (determinism) `make generate` twice + `diff -r` over sdk/ — the out-of-process SDK half of A-M0.4; (sdk-smoke) `make test-sdk` (E-M4.5); (test-mock) Dockerized `make test-mock`. Pins Go 1.26, uses pulumi/actions + setup-python where gen-sdk is needed. YAML validated; CI=true `make test` green locally; SDK verified deterministic across two generate runs (the determinism job's exact check); `sdk/` layout confirmed for the `mv sdk` step. NOT executed on a live runner (no GitHub Actions here) — workflow logic validated locally. Mark test/determinism/sdk-smoke as required checks once the repo is on GitHub.
+
+## FINAL — Wave 0 + Wave 1 complete; STOP at the Track-D decision gate
+
+All in-scope tickets landed on branch `execute/foundation` (21 commits ahead of
+main). Final verification: `make build` OK; `make test` + `go test -race ./...`
+green (121 test funcs, all passing); `go vet` + `gofmt -l` clean; the three
+embedded artifacts byte-identical to the post-S0.3 baseline; SDK deterministic
+across two `make generate` runs (the earlier one-off NON-DETERMINISTIC reading
+was a copy-during-regeneration race in the manual check, not a real defect —
+re-verified clean with sequential copies, and TestPipelineDeterministic covers
+the three Go-side artifacts in-process).
+
+Done: S0.1, S0.2, S0.3, QW-2/3/4, A-M0.2, A-M0.3, A-M0.4, A-M0.5, A-M0.6,
+A-M0.7, A-M0.8, A-M0.1, B-M1.2, B-M1.1, B-M1.3, C-M1.4, C-M1.5, E-M4.4, E-M4.5,
+F-M5.4, QW-1, QW-5, QW-6. Partial: E-M4.3 (no-Docker httptest part; skips on this
+darwin host, runs in Linux CI; live keychain path is Tier-2).
+
+STOPPED (left for human decision / out of scope, per the brief):
+- Track D (D-M2.*/D-M3.*) — gated on the per-variant-resources vs tagged-union
+  DECISION in 00-SYNTHESIS "Open question". This is the human checkpoint.
+- B-M1.6 (Wave 2), S0.4 (deferred), E-M4.1/E-M4.2 (live UniFi controller),
+  F-M5.1/5.2/5.3 (release), Track G (external repos), A-M0.2′ (re-baseline post-D).
+- `make test-mock` — Docker daemon UNHEALTHY in this environment; the trap fix
+  (F-M5.4) and the mock-tier smoke run are deferred until Docker is healthy.
