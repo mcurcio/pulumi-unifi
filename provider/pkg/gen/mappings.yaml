@@ -143,3 +143,23 @@ enums:
     # GetIntegrationIpAclRuleDtoPropertiesProtocolFilterItem). Pin to the neutral
     # entity-free name.
     Ipv4PropertiesProtocolFilterItem: ProtocolFilterItem
+
+# immutableFields pins the by-exception immutable resource inputs that the engine
+# (pass_replace_on_changes.go, D-M3.1) cannot derive from the spec, so changing one
+# forces a replace instead of an in-place update the API would reject or silently
+# drop (review 01-H2). The engine ALSO derives immutability automatically — every
+# spec `readOnly` property and every discriminated-variant's discriminator const
+# (type / management, pinned by D-M2.1) is marked replace without an entry here. This
+# list is only the spec-implicit pins a rule cannot see.
+#
+# Listed as bare SDK property names: the engine marks the field on EVERY resource
+# that actually has an input property of that name (derive-by-default, pin-by-
+# exception). A name no resource carries is a loud error (dead pin — see
+# pass_replace_on_changes_test.go), so it cannot silently rot across a spec bump.
+#
+# siteId is DELIBERATELY ABSENT: its fate (honored per-resource vs removed) and its
+# replace semantics are owned by D-M3.2, not this pass.
+immutableFields:
+  # A network's VLAN ID is identity: the API treats a VLAN change as a different
+  # network, not an in-place edit. Present only on the ManagedNetwork* variants.
+  - vlanId

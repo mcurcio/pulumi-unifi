@@ -61,11 +61,12 @@ type enumMappings struct {
 
 // mappingsFile is the parsed shape of mappings.yaml: the whole editorial layer.
 type mappingsFile struct {
-	ExcludedPaths []string            `yaml:"excludedPaths"`
-	Resources     resourceMappings    `yaml:"resources"`
-	Functions     functionMappings    `yaml:"functions"`
-	Descriptions  descriptionMappings `yaml:"descriptions"`
-	Enums         enumMappings        `yaml:"enums"`
+	ExcludedPaths   []string            `yaml:"excludedPaths"`
+	Resources       resourceMappings    `yaml:"resources"`
+	Functions       functionMappings    `yaml:"functions"`
+	Descriptions    descriptionMappings `yaml:"descriptions"`
+	Enums           enumMappings        `yaml:"enums"`
+	ImmutableFields []string            `yaml:"immutableFields"`
 }
 
 var (
@@ -156,4 +157,11 @@ func functionDescriptionOverride(short string) (string, bool) {
 func enumCanonicalRename(defaultShort string) (string, bool) {
 	v, ok := loadMappings().Enums.CanonicalRename[defaultShort]
 	return v, ok
+}
+
+// immutableFieldPins returns the by-exception immutable input-property names
+// (pass_replace_on_changes.go marks any resource that actually carries one).
+// Callers must not mutate the returned slice.
+func immutableFieldPins() []string {
+	return loadMappings().ImmutableFields
 }
