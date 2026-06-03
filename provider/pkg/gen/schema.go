@@ -2,6 +2,11 @@
 // schema + CRUD metadata via pulschema. Resource grouping/CRUD mapping is
 // auto-derived by pulschema from the REST path shape and verbs; the editorial
 // surface here is the provider config, the OpenAPIContext, and ExcludedPaths.
+//
+// schema.go is orchestration only: it assembles the static package identity
+// (packagespec.go), runs pulschema, and applies the post-process passes
+// (genstate.go / pass_*.go). The static PackageSpec literal, the config block,
+// and excludedPaths live in packagespec.go.
 package gen
 
 import (
@@ -19,108 +24,10 @@ import (
 	openapigen "github.com/cloudy-sky-software/pulschema/pkg"
 )
 
-const packageName = "unifi"
-
-// excludedPaths lists endpoints that are not clean CRUD resources (RPC-style
-// "actions", list "ordering" mutations, and read-only sub-resource lookups).
-// Feeding them to the auto-grouper produces junk resources, so they are dropped.
-// This list grows empirically as codegen output is inspected.
-var excludedPaths = []string{
-	"/v1/sites/{siteId}/acl-rules/ordering",
-	"/v1/sites/{siteId}/firewall/policies/ordering",
-	"/v1/sites/{siteId}/clients/{clientId}/actions",
-	"/v1/sites/{siteId}/devices/{deviceId}/actions",
-	"/v1/sites/{siteId}/devices/{deviceId}/interfaces/ports/{portIdx}/actions",
-	"/v1/sites/{siteId}/devices/{deviceId}/statistics/latest",
-	"/v1/sites/{siteId}/networks/{networkId}/references",
-}
-
 // PulumiSchema generates the Pulumi package schema, CRUD metadata, and the
 // pulschema-updated OpenAPI doc for the given (already fixed) spec.
 func PulumiSchema(openAPIDoc openapi3.T) (pschema.PackageSpec, openapigen.ProviderMetadata, openapi3.T) {
-	pkg := pschema.PackageSpec{
-		Name:        packageName,
-		Description: "A Pulumi package for managing UniFi Network resources via the official Integration API.",
-		DisplayName: "UniFi",
-		License:     "Apache-2.0",
-		Keywords: []string{
-			"pulumi",
-			packageName,
-			"unifi",
-			"ubiquiti",
-			"category/network",
-			"kind/native",
-		},
-		Homepage:   "https://github.com/mcurcio/pulumi-unifi",
-		Publisher:  "Matt Curcio",
-		Repository: "https://github.com/mcurcio/pulumi-unifi",
-
-		Config: pschema.ConfigSpec{
-			Variables: map[string]pschema.PropertySpec{
-				"apiKey": {
-					Description: "The UniFi Network Integration API key (sent as the X-API-Key header).",
-					TypeSpec:    pschema.TypeSpec{Type: "string"},
-					Secret:      true,
-				},
-				"apiHost": {
-					Description: "The UniFi controller host (and optional :port), e.g. \"192.168.1.1\" or \"unifi.example.com:443\". Overrides the host in the generated server URL.",
-					TypeSpec:    pschema.TypeSpec{Type: "string"},
-				},
-				"siteId": {
-					Description: "The UniFi site ID used to fill the {siteId} path parameter on site-scoped resources. Defaults to \"default\".",
-					TypeSpec:    pschema.TypeSpec{Type: "string"},
-				},
-				"allowInsecure": {
-					Description: "Skip TLS certificate verification when connecting to the controller. Use only for controllers presenting self-signed certificates on a trusted network. Note: this also disables the HTTP 429 rate-limit retry wrapper.",
-					TypeSpec:    pschema.TypeSpec{Type: "boolean"},
-				},
-			},
-		},
-
-		Provider: pschema.ResourceSpec{
-			ObjectTypeSpec: pschema.ObjectTypeSpec{
-				Description: "The provider type for the unifi package.",
-				Type:        "object",
-			},
-			InputProperties: map[string]pschema.PropertySpec{
-				"apiKey": {
-					DefaultInfo: &pschema.DefaultSpec{
-						Environment: []string{"UNIFI_APIKEY"},
-					},
-					Description: "The UniFi Network Integration API key (sent as the X-API-Key header).",
-					TypeSpec:    pschema.TypeSpec{Type: "string"},
-					Secret:      true,
-				},
-				"apiHost": {
-					DefaultInfo: &pschema.DefaultSpec{
-						Environment: []string{"UNIFI_API_HOST"},
-					},
-					Description: "The UniFi controller host (and optional :port).",
-					TypeSpec:    pschema.TypeSpec{Type: "string"},
-				},
-				"siteId": {
-					DefaultInfo: &pschema.DefaultSpec{
-						Environment: []string{"UNIFI_SITEID"},
-					},
-					Description: "The UniFi site ID used to fill the {siteId} path parameter.",
-					TypeSpec:    pschema.TypeSpec{Type: "string"},
-				},
-				"allowInsecure": {
-					DefaultInfo: &pschema.DefaultSpec{
-						Environment: []string{"UNIFI_ALLOW_INSECURE"},
-					},
-					Description: "Skip TLS certificate verification when connecting to the controller.",
-					TypeSpec:    pschema.TypeSpec{Type: "boolean"},
-				},
-			},
-		},
-
-		PluginDownloadURL: "github://api.github.com/mcurcio/pulumi-unifi",
-		Types:             map[string]pschema.ComplexTypeSpec{},
-		Resources:         map[string]pschema.ResourceSpec{},
-		Functions:         map[string]pschema.FunctionSpec{},
-		Language:          map[string]pschema.RawMessage{},
-	}
+	pkg := packageSpec()
 
 	csharpNamespaces := map[string]string{
 		packageName: "Unifi",
@@ -182,6 +89,7 @@ func rawMessage(v interface{}) pschema.RawMessage {
 // pass's position when appending here.
 var passes = []pass{
 	{name: "coalesce-discriminated-crud", fn: coalesceDiscriminatedCRUDPass},
+	{name: "mark-secret-fields", fn: markSecretFieldsPass},
 }
 
 // runPasses applies every registered pass to state in order. A pass returning an
