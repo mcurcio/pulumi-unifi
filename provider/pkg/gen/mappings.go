@@ -43,11 +43,20 @@ type functionMappings struct {
 	ExplicitRenames map[string]string `yaml:"explicitRenames"`
 }
 
+// descriptionMappings holds the by-exception description overrides (the engine
+// synthesizes a default for every token; these pin the cases where that default
+// is too weak), keyed by final token short name.
+type descriptionMappings struct {
+	Resources map[string]string `yaml:"resources"`
+	Functions map[string]string `yaml:"functions"`
+}
+
 // mappingsFile is the parsed shape of mappings.yaml: the whole editorial layer.
 type mappingsFile struct {
-	ExcludedPaths []string         `yaml:"excludedPaths"`
-	Resources     resourceMappings `yaml:"resources"`
-	Functions     functionMappings `yaml:"functions"`
+	ExcludedPaths []string            `yaml:"excludedPaths"`
+	Resources     resourceMappings    `yaml:"resources"`
+	Functions     functionMappings    `yaml:"functions"`
+	Descriptions  descriptionMappings `yaml:"descriptions"`
 }
 
 var (
@@ -115,5 +124,19 @@ func irregularSingularMap() map[string]string {
 // that a mechanical rule cannot derive, and whether one is mapped.
 func explicitFunctionRename(short string) (string, bool) {
 	v, ok := loadMappings().Functions.ExplicitRenames[short]
+	return v, ok
+}
+
+// resourceDescriptionOverride returns the pinned description for a resource token
+// short name (where the synthesized default is too weak), and whether one exists.
+func resourceDescriptionOverride(short string) (string, bool) {
+	v, ok := loadMappings().Descriptions.Resources[short]
+	return v, ok
+}
+
+// functionDescriptionOverride returns the pinned description for a function token
+// short name, and whether one exists.
+func functionDescriptionOverride(short string) (string, bool) {
+	v, ok := loadMappings().Descriptions.Functions[short]
 	return v, ok
 }

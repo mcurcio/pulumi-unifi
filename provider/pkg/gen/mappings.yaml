@@ -79,3 +79,42 @@ functions:
     listTrafficMatching: getTrafficMatchingList # get-one (R = …/{id})
     listTrafficMatchings: listTrafficMatchingLists # list-all
     getFirewallPolicie: listFirewallPolicies # list-all (counterpart of getFirewallPolicy)
+
+# descriptions pins the resource/function top-level Description where the
+# synthesized text (the spec operation summary, or an entity+verb template) is not
+# good enough. The engine (pass_descriptions.go) synthesizes a default for EVERY
+# resource and function; these overrides are by-exception, keyed by the final
+# (post-rename, post-depage) token short name.
+#
+# The discriminated-variant resources all share one collection summary ("Create
+# DNS Policy", "Create Network", …) that cannot distinguish A_RECORD from
+# AAAA_RECORD, so each variant gets a precise description here. Voucher and
+# AdoptDevice are batch/action RPCs masquerading as CRUD (D-M3.3) — their
+# descriptions state that honestly so the non-declarative semantics are documented
+# rather than hidden.
+descriptions:
+  resources:
+    # DNS record variants (collection summary "Create DNS Policy" is ambiguous).
+    DnsARecord: An A DNS record (maps a domain to an IPv4 address) managed via the UniFi DNS policy API.
+    DnsAaaaRecord: An AAAA DNS record (maps a domain to an IPv6 address) managed via the UniFi DNS policy API.
+    DnsCnameRecord: A CNAME DNS record (aliases one domain to another) managed via the UniFi DNS policy API.
+    DnsMxRecord: An MX DNS record (mail exchanger) managed via the UniFi DNS policy API.
+    DnsSrvRecord: An SRV DNS record (service location) managed via the UniFi DNS policy API.
+    DnsTxtRecord: A TXT DNS record (free-form text) managed via the UniFi DNS policy API.
+    DnsForwardDomain: A DNS forward-domain policy (forwards a domain to an upstream resolver) on UniFi.
+    # WiFi broadcast variants (collection summary "Create Wifi Broadcast").
+    WifiBroadcastStandard: A standard-profile WiFi network broadcast (SSID) on UniFi.
+    WifiBroadcastIotOptimized: An IoT-optimized WiFi network broadcast (SSID) on UniFi.
+    # Managed network variants (collection summary "Create Network").
+    ManagedNetworkGateway: A gateway-managed UniFi network (the gateway routes this network).
+    ManagedNetworkSwitch: A switch-managed UniFi network (managed at the switch layer).
+    ManagedNetworkUnmanaged: An unmanaged UniFi network (UniFi does not manage routing/switching).
+    # Traffic-match variants (collection summaries "Create ACL Rule" / "Create Traffic Matching List").
+    TrafficMatchMac: A MAC-address traffic-matching ACL rule on UniFi.
+    TrafficMatchIpv4: An IPv4 traffic-matching ACL rule on UniFi.
+    TrafficMatchIpv4Addresses: An IPv4-addresses traffic-matching list on UniFi.
+    TrafficMatchIpv6Addresses: An IPv6-addresses traffic-matching list on UniFi.
+    TrafficMatchPorts: A ports traffic-matching list on UniFi.
+    # Batch/action RPCs modeled as resources (D-M3.3) — documented honestly.
+    Voucher: "Generates a batch of UniFi hotspot guest vouchers. NOTE: this is a batch-generate action, not a declarative resource: `count` controls how many vouchers are created at once and the generated codes are returned as outputs; updating `count` does not reconcile an existing batch and `pulumi destroy` revokes the generated vouchers. Treat each apply as a one-shot generation."
+    AdoptDevice: "Adopts UniFi device(s) into the site. NOTE: this is an imperative action, not a declarative resource: it triggers device adoption by MAC address; there is no in-place update, and `pulumi destroy` unadopts (removes) the device. Models the official API's POST /devices adopt action."

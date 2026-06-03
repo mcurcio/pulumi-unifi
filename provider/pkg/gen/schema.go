@@ -102,6 +102,11 @@ var passes = []pass{
 	// Naming polish: entity-prefix the context-free variant tokens and normalize
 	// function names. Runs after the discriminator value is recovered.
 	{name: "token-rename", fn: tokenRenamePass},
+	// Annotation: synthesize a top-level Description for every resource + function.
+	// Runs after the renames so override keys match the final token names; keys off
+	// the spec operation summary (or a mappings.yaml override), so it is robust to
+	// later token changes.
+	{name: "descriptions", fn: descriptionsPass},
 	{name: "mark-secret-fields", fn: markSecretFieldsPass},
 }
 
