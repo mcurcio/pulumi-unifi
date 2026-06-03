@@ -24,8 +24,9 @@ The specs are machine-consumable enough to drive code generation of both a provi
 REST CRUD runtime.
 
 > **Provenance / license:** the beezly repo has **no license**. Treat the spec strictly as a
-> codegen *input*: vendor a copy, pin the exact upstream commit SHA in `openapi/`, and record it.
-> Worst case, the same OpenAPI document can be re-extracted from an owned controller.
+> codegen *input*: pin the exact upstream commit SHA + checksum in `openapi/SOURCE` and **fetch it at
+> build** (`openapi/fetch.sh`) — it is a gitignored build artifact, never committed. Worst case, the
+> same OpenAPI document can be re-extracted from an owned controller.
 
 ## 2. Toolchain
 
@@ -33,14 +34,14 @@ The path Pulumi documents for generating a provider from an OpenAPI spec:
 
 | Tool | Role |
 |---|---|
-| [pulschema](https://github.com/cloudy-sky-software/pulschema) | OpenAPI spec → Pulumi Package Schema (`schema.json`) + CRUD endpoint map (`metadata.json`). Handles types, `$ref`, `oneOf`/`discriminator`. **Does not** decide resource grouping. |
-| [pulumi-provider-framework](https://github.com/cloudy-sky-software/pulumi-provider-framework) | Generic Go HTTP CRUD runtime that executes `metadata.json` against the REST API. This is the gRPC provider plugin binary. `X-API-KEY` + base URL injected here. |
+| [pulschema](https://github.com/cloudy-sky-software/pulschema) | OpenAPI spec → Pulumi Package Schema (`schema.json`) + CRUD endpoint map (`metadata.json`). Handles types and `$ref`, and **auto-derives resource grouping** from the REST path shape + verbs (see §4). A discriminated request body is split into **one resource per variant** — it does *not* emit a Pulumi `oneOf` tagged union (see §8). |
+| [pulumi-provider-framework](https://github.com/cloudy-sky-software/pulumi-provider-framework) | Generic Go HTTP CRUD runtime that executes `metadata.json` against the REST API. This is the gRPC provider plugin binary. It derives the **auth header name from the spec's security scheme** and overrides only the server **host** (`apiHost`) at runtime (see §6). |
 | `pulumi package gen-sdk` | Emits language SDKs (Python first; TS/Go/.NET available) from `schema.json`. |
 
 **Why Go:** Pulumi provider plugins are gRPC servers distributed as binaries. Go compiles to a
 standalone binary with no runtime dependency and has the most mature codegen tooling. The
-hand-written Go in this repo is confined to thin glue (auth, the codegen entrypoint, the grouping
-config); the bulk of the provider is generated.
+hand-written Go in this repo is confined to thin glue (auth callbacks, the codegen entrypoint, spec
+fixes + an `ExcludedPaths` list); the bulk of the provider is generated.
 
 **Why not alternatives:**
 - *In-repo `pulumi.dynamic` provider* — ships provider code inside the consumer, Python-only, not
@@ -56,41 +57,56 @@ config); the bulk of the provider is generated.
 beezly spec (pinned commit SHA + controller version)
         │
         ▼
+   FixOpenAPIDoc (inject X-API-Key scheme, rewrite server URL) + ExcludedPaths
+        │
+        ▼
    pulschema  ──────────────▶  schema.json  +  metadata.json
-        │                              │
-        │      resource-grouping config (operationId → resource token + verbs)
-        ▼                              ▼
+        │   (grouping auto-derived from path shape + verbs)
+        ▼
   pulumi-provider-framework runtime (Go plugin binary: pulumi-resource-unifi)
         │
         ▼
   pulumi package gen-sdk --language python  ──────▶  sdk/python  (pulumi_unifi)
 ```
 
-The pipeline is **deterministic**: same pinned spec + same grouping config → identical
-`schema.json`, `metadata.json`, and SDK. Regeneration is driven by bumping the vendored spec
-version.
+The pipeline is **deterministic**: same pinned spec + same fixes/exclusions → identical
+`schema.json`, `metadata.json`, and SDK. Every generated/fetched output is a **gitignored build
+artifact** (the spec, the three codegen outputs, and `sdk/python`) — `make build`/`make generate`
+fetch + regenerate them on demand and the plugin `//go:embed`s the three codegen outputs at compile
+time. Regeneration is driven by bumping the pinned spec version. (Determinism required one fix: every
+component schema is given a unique title so discriminated-getter names don't collapse — see
+`ensureSchemaTitles`.)
 
-## 4. Resource grouping (the one editorial layer)
+## 4. Resource grouping (auto-derived; the editorial layer is exclusions)
 
 OpenAPI is **operation-centric** (a flat list of path+method operations); Pulumi is
-**resource-centric** (one resource = a CRUD lifecycle around one entity). pulschema translates
-*types* but does not decide which operations form a resource. A small config supplies that:
+**resource-centric** (one resource = a CRUD lifecycle around one entity). **pulschema auto-derives
+this grouping** from the `/v1/sites/{siteId}/<entity>[/{id}]` path shape and the verbs present:
+collection `GET`/`POST` + item `GET`/`PUT`/`DELETE` on the same entity path collapse into one
+resource token, with create/read/update/delete bound to the matching endpoints and the resource ID
+taken from the response `id`. There is **no hand-authored `grouping.{go,yaml}`** — that step was in
+an earlier design and does not match the toolchain.
 
-- Group an entity's operations into one resource token, e.g.
-  `createWifiBroadcast` / `getWifiBroadcastDetails` / `updateWifiBroadcast` / `deleteWifiBroadcast`
-  → `unifi:network:WifiBroadcast`, binding create/read/update/delete to the right endpoints.
-- Specify ID extraction (the response field — typically `id` — that becomes the Pulumi resource ID).
-- Entities exposing only `GET` (list/details) → **data sources** (Pulumi functions), not resources.
+The actual editorial surface is therefore narrow:
 
-The config is keyed off the spec's **stable** `operationId` patterns and the
-`/v1/sites/{siteId}/<entity>/{id}` path shape, so it survives spec version bumps with minimal churn.
+- **`ExcludedPaths`** (in `provider/pkg/gen/schema.go`) drops endpoints that are not clean CRUD —
+  RPC-style `*/actions`, `*/ordering` mutations, and read-only sub-resource lookups — which would
+  otherwise produce junk resources. The list grows empirically as codegen output is inspected.
+- **`FixOpenAPIDoc`** (Risks A/B in §6) and **`SanitizeSpecBytes`** (legalizing component keys,
+  normalizing type-less/`null` schemas the low-quality capture ships) make the spec consumable.
+
+**Token shape:** because grouping derives from the path, the module is `sites/v1`-based, e.g.
+`unifi:sites/v1:Gateway`, `unifi:sites/v1:getNetworksOverviewPage`. Entities exposing only `GET`
+become **data sources** (Pulumi functions), not resources.
 
 ## 5. Self-scoping to the official API's write coverage
 
-As of mid-2026 the official API key is **largely read-only** — Ubiquiti is rolling write endpoints
-out through 2026. Today only ~20–30% of UniFi config is writable via the official API (centered on
-**WiFi broadcasts / SSIDs** and any Early-Access write endpoints present in the pinned controller
-version); **reads cover all entities**.
+As of mid-2026 the official API key is **partially writable** — Ubiquiti is rolling write endpoints
+out through 2026. The pinned 10.4.57 spec exposes **9 writable entity endpoints**
+(`acl-rules`, `dns/policies`, `firewall/policies`, `firewall/zones`, `networks`,
+`traffic-matching-lists`, `hotspot/vouchers`, `wifi/broadcasts`, and device adopt), which fan out
+to **21 Pulumi resources** after per-variant splitting (§8), alongside **50 read-only data
+sources**. Reads cover effectively all entities.
 
 The provider does not hardcode a resource list. It classifies each entity by the verbs the pinned
 spec exposes:
@@ -104,17 +120,39 @@ as Ubiquiti ships their writes — no per-resource hand-coding, just a spec bump
 
 ## 6. Provider configuration & auth
 
-Provider config (mirrors the knobs in the legacy `iac/unifi/providers.tf`):
+Provider config:
 
-| Key | Notes |
-|---|---|
-| `apiUrl` | e.g. `https://<console>/proxy/network/integration/v1` |
-| `apiKey` | **secret**; sent as the `X-API-KEY` request header |
-| `allowInsecure` | accept a self-signed controller TLS cert |
-| `siteId` | default site (e.g. `default`/`home`); per-resource override allowed |
+| Key | Env | Notes |
+|---|---|---|
+| `apiKey` | `UNIFI_APIKEY` | **secret**; sent as the bare `X-API-Key` request header value |
+| `apiHost` | `UNIFI_API_HOST` | controller host (and optional `:port`), e.g. `192.168.1.1` or `unifi.example.com:443`. Overrides **only the host** of the generated server URL |
+| `siteId` | `UNIFI_SITEID` | site ID filling the `{siteId}` path param; defaults to `default` |
+| `allowInsecure` | `UNIFI_ALLOW_INSECURE` | bool; skip TLS verification for self-signed controller certs (see caveat below). Defaults to off |
 
-Auth + base-URL injection live in the `pulumi-provider-framework` runtime wiring — the one place
-the provider knows the wire protocol.
+Two non-obvious constraints drive this (both handled in `FixOpenAPIDoc`):
+
+- **Risk A — auth (header name comes from the spec).** The fetched spec has **no
+  `securitySchemes`**. `FixOpenAPIDoc` injects an `apiKey`/`in: header` scheme named **`X-API-Key`**;
+  the framework derives the auth *header name* from that scheme, and the provider's
+  `GetAuthorizationHeader()` returns the **bare key** as the value (no `Bearer`/scheme prefix).
+  pulschema also emits the `apiKey` config property from that scheme.
+- **Risk B — base URL (host swap only).** The spec ships a **relative** `/integration` server and
+  the framework can override only the **host**, not the full URL. `FixOpenAPIDoc` rewrites the
+  server to an absolute `https://localhost/proxy/network/integration`; at configure time the
+  framework swaps the host for `apiHost`, leaving scheme + path intact.
+
+> **`allowInsecure` (TLS verification).** Off by default, and on the off-path the framework's HTTP
+> client is byte-for-byte unchanged: the provider trusts the controller CA through the OS trust store.
+> That store is platform-specific — on Linux Go's default transport honors `SSL_CERT_FILE`; on macOS it
+> verifies against the Security.framework keychain and **ignores `SSL_CERT_FILE`** (it also rejects
+> certs valid >398 days). Setting `allowInsecure=true` accepts self-signed controller certs by replacing
+> the framework's transport with one that skips verification (`InjectInsecureTransport`, mirroring the
+> framework's transport shape). **Caveat:** the framework's rate-limit (HTTP 429) retry wrapper is
+> unexported, so the insecure path replaces it and loses automatic 429 retry — acceptable for
+> single-controller use on a trusted network; the clean fix is an upstream exported transport setter.
+>
+> The Tier-1 mock tier dogfoods `allowInsecure=true` (so it runs identically on Linux and macOS); the
+> CA-pinned secure path (OS trust with `allowInsecure=false`) is validated by the Tier-2 live test.
 
 ## 7. Distribution
 
@@ -128,8 +166,25 @@ the provider knows the wire protocol.
 
 - **Write coverage is a schedule risk, not a tooling one.** The writable resource set grows as
   Ubiquiti ships endpoints through 2026.
-- **Polymorphic schemas** (`oneOf` + `discriminator`) must map to Pulumi tagged-union types —
-  validate pulschema's output here specifically (the WiFi broadcast standard/IoT variants are the
-  first test case).
-- **`siteId`** — confirm single-site (`home`) vs multi-site provider config; default + override.
-- **License/provenance** of the vendored spec — pin a commit SHA, document it.
+- **Polymorphic schemas — resolved, but not as expected.** pulschema does **not** emit Pulumi
+  `oneOf` tagged unions for the spec's `oneOf` + `discriminator` bodies. It **splits each
+  discriminated union into one resource/type per variant**: WiFi broadcast → `Standard` /
+  `IotOptimized`; traffic-matching → `Mac` / `Ports` / `Ipv4`; managed network → `Gateway` /
+  `Switch` / `Unmanaged`; DNS records → `ARecord` / `AaaaRecord` / `CnameRecord` / … This is why 9
+  writable endpoints (§5) become 21 resources. Consumers pick the concrete variant resource rather
+  than setting a discriminator field. (One determinism hazard this exposed — variant getter names
+  collapsing — is handled by `ensureSchemaTitles`.)
+  - **CRUD fragmentation — repaired in the gen layer.** The same split scatters an entity's verbs
+    across per-variant tokens: pulschema binds only **create** to each variant token (read/update/
+    delete land on separate per-verb schema names), so 18 of the 21 resources generate as
+    create-only stubs that would die on the next `pulumi up` ("resource read endpoint is unknown").
+    `coalesceDiscriminatedCRUD` (`provider/pkg/gen/schema.go`) is a deterministic post-process,
+    analogous to the `FixOpenAPIDoc` fix layer: for each resource token it fills the missing
+    R/U/D/P from the entity's shared item path (`P_coll + "/{param}"`; the discriminator rides in
+    the request body, so the item path is correct for every variant) and prunes the orphan per-verb
+    keys. Result: all 21 resources round-trip full CRUD, `crudMap` keys = exactly the live
+    resource + function tokens. The long-term fix is upstream (per-verb discriminator schema names).
+- **`siteId`** — defaults to `default`; per-resource override is a Phase-4 item (the global path
+  param is set once at configure time today).
+- **License/provenance** of the fetched spec — pinned commit SHA + checksum recorded in
+  `openapi/SOURCE`; the spec is fetched at build, not committed.

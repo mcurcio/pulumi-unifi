@@ -1,0 +1,23 @@
+# TLS terminator + edge proxy in front of the Prism HTTP mock.
+#
+# The provider speaks https:// (the generated server URL scheme is fixed at
+# codegen time and the framework only swaps the host). Prism mock serves plain
+# HTTP, so Caddy terminates TLS with the locally-generated server cert and
+# reverse-proxies to Prism. Published on host port 8443 (see docker-compose).
+#
+# Path: the provider requests the controller's external integration path,
+# /proxy/network/integration/v1/..., but Prism mounts the spec's path-item keys
+# verbatim (/v1/...) and ignores the server's base path. handle_path strips the
+# /proxy/network/integration prefix before proxying — Caddy stands in for the
+# controller's edge proxy, which routes that prefix to the Network app (= Prism).
+{
+	auto_https off
+	admin off
+}
+
+:443 {
+	tls /certs/server.crt /certs/server.key
+	handle_path /proxy/network/integration/* {
+		reverse_proxy prism:4010
+	}
+}

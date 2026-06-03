@@ -1,0 +1,39 @@
+# Tier-2 e2e: a real UniFi controller exposing the official Integration API at
+# :11443/proxy/network/integration/v1. Only UniFi OS Server serves this surface
+# and can mint X-API-Keys — the plain linuxserver/unifi-network-application image
+# CANNOT, so it is not usable here.
+#
+# This container is heavy (systemd, multi-GB RAM) and has NO headless first-run
+# setup or documented key-minting API. Provisioning (see README.md) is the hard,
+# operationally-fragile part: first-run wizard + API-key creation must be scripted
+# (Playwright UI automation) or restored from a pre-baked volume snapshot.
+#
+# Pin a controller version aligned to the vendored spec (10.4.x) so resource
+# shapes match. Adjust the image ref once a 10.4.x UniFi OS Server image/source is
+# selected — left as a TODO rather than guessed.
+
+services:
+  unifi:
+    # TODO: pin a UniFi OS Server image at controller version 10.4.x. The exact
+    # distributable is an operational decision (licensed image vs. self-built);
+    # do not assume a public tag without verifying it serves the Integration API.
+    image: unifi-os-server:10.4.x # placeholder — must be set before use
+    privileged: true
+    tmpfs:
+      - /run
+      - /run/lock
+    ports:
+      - "11443:11443" # Integration API (https)
+      - "8443:8443" #   classic Network app UI (provisioning)
+    volumes:
+      - unifi-data:/data
+    healthcheck:
+      # Ready when the Integration API root answers TLS (401 without a key is OK).
+      test: ["CMD", "sh", "-c", "curl -ksf -o /dev/null -w '%{http_code}' https://localhost:11443/proxy/network/integration/v1/sites | grep -qE '200|401|403'"]
+      interval: 30s
+      timeout: 10s
+      retries: 40 # startup is minutes, not seconds
+      start_period: 120s
+
+volumes:
+  unifi-data:

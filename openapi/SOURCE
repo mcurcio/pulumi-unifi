@@ -1,0 +1,41 @@
+UniFi Network Integration API — pinned OpenAPI spec (fetched at build)
+======================================================================
+
+This file is the PIN MANIFEST, not the spec. The spec itself
+(unifi-network-10.4.57.json) is a build artifact: fetched by ./fetch.sh from the
+pinned commit below, checksum-verified, and gitignored — never committed. To
+update, bump the SHA/checksum in fetch.sh and this file, then re-run `make generate`.
+
+File:        unifi-network-10.4.57.json  (fetched; gitignored)
+API version: 10.4.57 (info.version)
+OpenAPI:     3.1.0
+Paths:       44
+
+Upstream
+--------
+Repo:   https://github.com/beezly/unifi-apis
+Commit: ea6a5bc3bb7a8744768fb64f5717b3694db104c7  (branch: main)
+Path:   unifi-network/10.4.57.json
+
+Checksum
+--------
+sha256: ee1492cf23390482e4c1fd263dd199c5e0650959a1b60bb946a5e773da3d035b
+
+License
+-------
+The upstream repository declares NO license. The fetched spec is used strictly as
+a code-generation INPUT (it is transformed by provider/pkg/gen into schema.json
++ metadata.json) and is not redistributed as a standalone product. It is not the
+official Ubiquiti spec; it is a community capture of the official UniFi Network
+Integration API.
+
+Notes for codegen (see provider/pkg/gen/openapi_fixes.go)
+--------------------------------------------------------
+- servers[0].url is the RELATIVE "/integration" — FixOpenAPIDoc rewrites it to an
+  absolute "https://<host>/proxy/network/integration" so the framework's base URL
+  (Servers[0].URL) is usable.
+- components.securitySchemes is ABSENT — FixOpenAPIDoc injects an apiKey scheme
+  (in: header, name: X-API-Key) so the framework derives the auth header name and
+  pulschema emits the apiKey provider config.
+
+Refresh with ./fetch.sh (re-verifies the checksum above).

@@ -1,0 +1,39 @@
+# Tier-1 mock: a spec-driven Prism mock of the UniFi Integration API behind a
+# TLS terminator, for the read-path integration test (no real controller).
+#
+# Prism serves the *generated* OpenAPI doc (provider/cmd/pulumi-resource-unifi/
+# openapi_generated.yml) — not the raw vendored spec — because that doc carries
+# the rewritten absolute server path (/proxy/network/integration) and the
+# sanitized component keys the provider actually requests against. Serving the
+# raw spec would route under /integration and 404 every request.
+#
+# Bring up:   make test-mock      (or: docker compose -f test/mock/docker-compose.yml up)
+# The read + write tests run against https://127.0.0.1:8443; they trust the mock's
+# self-signed cert via the provider's allowInsecure=true flag (see the integration tests).
+
+services:
+  prism:
+    image: stoplight/prism:5
+    # --no-multiprocess: Prism's default multiprocess mode crashes on boot in the
+    # current :5 image (`TypeError: Cannot read properties of undefined (reading
+    # 'isPrimary')` in createMultiProcessPrism) — the forked server never binds
+    # 4010 and Caddy answers 502. Single-process mode avoids that code path and is
+    # plenty for a test mock.
+    command: >
+      mock -h 0.0.0.0 -p 4010
+      --no-multiprocess
+      /specs/openapi_generated.yml
+    volumes:
+      - ../../provider/cmd/pulumi-resource-unifi/openapi_generated.yml:/specs/openapi_generated.yml:ro
+    expose:
+      - "4010"
+
+  tls:
+    image: caddy:2
+    depends_on:
+      - prism
+    ports:
+      - "8443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
