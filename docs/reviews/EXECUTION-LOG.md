@@ -144,3 +144,4 @@ smoke PASS.
 - D-M2.7 `28604d7` enum dedup (5 families, 158->150 types; 2 mappings.yaml pins) + empty-type prune guard. Numeric enums deferred to G-U3. Verified: unit + determinism + test-mock green (mock first-run hit the recurring Caddy/Prism startup race again, green on warm stack). Token golden unchanged (Types-only).
 - D-M3.1 `730451d` replaceOnChanges (per-property bool; 18 discriminator consts + vlanId on 3 ManagedNetwork; siteId excluded). Verified placement vs Pulumi v3.230 source. Token golden unchanged.
 - HARNESS FIX `806d340` test-mock readiness gate (poll TLS->Caddy->Prism until non-gateway before tests). Kills the Prism boot 502 race. Verified: 3/3 first-try-green make test-mock runs.
+- D-M3.2 finalize siteId: framework already honors resource-level siteId (request.go getPathParamsMap). Added wire override test + description + replaceOnChanges (mappings.yaml data). Verified unit+mock first-try-green; token golden unchanged.
