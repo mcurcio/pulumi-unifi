@@ -61,7 +61,7 @@ has the detail, grouped by track (= owner = parallel lane).
 | D-M2.4 | `pass_descriptions.go` — synthesize descriptions | D | 2 | M | S0.2, A-M0.2 | ☑ |
 | D-M2.5 | `pass_depage.go` — de-pageify list data sources | D | 2 | M | S0.2, A-M0.2 | ☑ |
 | D-M2.6 | ~~prune redundant getters~~ — **DROPPED**: keep per-variant getters (symmetric with shape-b resources; preserves typed reads) | D | 2 | — | — | ✗ |
-| D-M2.7 | `pass_enum.go` — dedup + preserve numeric + prune empty types | D | 2 | M | S0.2, A-M0.2 | ☐ |
+| D-M2.7 | `pass_enum.go` — dedup enums + prune empty types (numeric→G-U3) | D | 2 | M | S0.2, A-M0.2 | ☑ |
 | D-M3.1 | `pass_replace_on_changes.go` — identity/immutable fields | D | 2 | M | S0.2, A-M0.2 | ☐ |
 | D-M3.2 | Per-resource `siteId`: honor or remove (cross-cutting) | D | 2 | M | S0.1, S0.2, A-M0.2 | ☐ |
 | D-M3.3 | `Voucher`/`AdoptDevice` action/batch (cross-cutting) | D | 2 | M | S0.2, A-M0.2 | ☐ |
