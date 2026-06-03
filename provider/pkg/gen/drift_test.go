@@ -6,6 +6,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/getkin/kin-openapi/openapi3"
+
+	"github.com/cloudy-sky-software/pulumi-provider-framework/openapi"
 )
 
 // goldenTokensPath is the committed token-set golden: the sorted union of every
@@ -79,6 +83,73 @@ func TestTokenSetMatchesGolden(t *testing.T) {
 	sort.Strings(removed)
 	t.Errorf("token set drifted from %s (rebase with UPDATE_GOLDEN=1 after review)\n  added (%d):\n%s\n  removed (%d):\n%s",
 		goldenTokensPath, len(added), indent(added), len(removed), indent(removed))
+}
+
+// fixedDoc returns the sanitized + FixOpenAPIDoc'd spec — the exact document
+// pulschema consumes, and the one ExcludedPaths is resolved against.
+func fixedDoc(t *testing.T) *openapi3.T {
+	t.Helper()
+	specBytes, err := os.ReadFile(findSpec(t))
+	if err != nil {
+		t.Fatalf("read spec: %v", err)
+	}
+	sanitized, err := SanitizeSpecBytes(specBytes)
+	if err != nil {
+		t.Fatalf("SanitizeSpecBytes: %v", err)
+	}
+	doc := openapi.GetOpenAPISpec(sanitized)
+	if err := FixOpenAPIDoc(doc); err != nil {
+		t.Fatalf("FixOpenAPIDoc: %v", err)
+	}
+	return doc
+}
+
+// TestExcludedPathsResolve is the dead-entry guard (A-M0.3): every excludedPaths
+// entry must still match a path in the spec pulschema sees. A removed or renamed
+// path in a spec bump would otherwise leave a stale exclusion that silently
+// stops dropping anything (re-leaking a junk resource).
+func TestExcludedPathsResolve(t *testing.T) {
+	doc := fixedDoc(t)
+	for _, p := range excludedPaths {
+		if doc.Paths.Find(p) == nil {
+			t.Errorf("excludedPaths entry %q no longer matches any spec path (dead exclusion — re-check on spec bump)", p)
+		}
+	}
+}
+
+// TestNoDuplicateShortTokenNames is the collision guard (A-M0.3): the resource
+// and function token sets must have no duplicate short names (the segment after
+// the last ":"). pulschema's per-variant split can collide bare names like
+// Standard/Mac/Ipv4 across entities on a future bump; a collision means two
+// different schema entries fight over one SDK class name.
+func TestNoDuplicateShortTokenNames(t *testing.T) {
+	pkg, _ := runPipelineTyped(t)
+
+	check := func(kind string, toks map[string]bool) {
+		seen := map[string]string{} // short name -> first full token
+		for tok := range toks {
+			short := tok
+			if i := strings.LastIndex(tok, ":"); i >= 0 {
+				short = tok[i+1:]
+			}
+			if prior, dup := seen[short]; dup {
+				t.Errorf("duplicate %s short name %q: %q and %q", kind, short, prior, tok)
+			} else {
+				seen[short] = tok
+			}
+		}
+	}
+
+	resources := map[string]bool{}
+	for tok := range pkg.Resources {
+		resources[tok] = true
+	}
+	functions := map[string]bool{}
+	for tok := range pkg.Functions {
+		functions[tok] = true
+	}
+	check("resource", resources)
+	check("function", functions)
 }
 
 func lineSet(s string) map[string]bool {

@@ -17,6 +17,10 @@ Verification bar: `make build` + `make test` (no Docker) green. Pure refactors
 - S0.3 + QW-2 + QW-3 + QW-4 | ☑ | 80840d1 | moved static PackageSpec literal + excludedPaths + packageName into packagespec.go; schema.go now orchestration-only (calls packageSpec(), runs pulschema, runs passes). Single-sourced config descriptions via configKeys map → configVariables()/providerInputProperties() (QW-2; the only delta is DefaultInfo.Environment). QW-3: dropped duplicate "unifi" keyword. QW-4: added pass_secret_fields.go (markSecretFieldsPass) marking HotspotVoucherDetails.code secret — loud-on-drift if the type/prop token is absent. OUTPUT-AFFECTING (intended): schema.json diff = {dropped "unifi" keyword, voucher code secret:true, 3 InputProperties descriptions unified to the richer text}; metadata.json + openapi_generated.yml unchanged. Determinism (TestPipelineDeterministic) green; race/vet/gofmt clean; secret-fields guard sanity-checked RED on a bad token then reverted. This was the last output-affecting Wave-0 change → A-M0.2 baselines next.
 - A-M0.2 | ☑ | f50654f | committed provider/pkg/gen/testdata/tokens.txt golden (71 tokens = 21 resource + 50 function, kind-prefixed) baselined AFTER S0.3/QW-3/QW-4; added drift_test.go (no Docker) — TestTokenSetMatchesGolden regenerates the typed pipeline token set and diffs vs golden with a readable added/removed report; `UPDATE_GOLDEN=1` rebases it (deliberate reviewed step). Guard sanity-checked RED (junk golden line → diff reported) then restored. make test green.
 
+### Wave 1
+
+- A-M0.3 | ☑ | 59e905d | added two guards to drift_test.go: TestExcludedPathsResolve (every excludedPaths entry resolves against the sanitized+fixed doc via doc.Paths.Find — dead-exclusion guard) and TestNoDuplicateShortTokenNames (no duplicate short names within the resource or function token set — variant-collision guard). excludedPaths guard sanity-checked RED with a bogus entry then reverted; dup-detection logic verified RED on a synthetic collision. make test green.
+
 ## CHECKPOINT — Wave 0 → Wave 1 boundary
 
 The delicate seam work is landed and the safety net is in place. Summary of what
