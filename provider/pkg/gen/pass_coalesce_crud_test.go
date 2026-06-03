@@ -119,17 +119,20 @@ func TestCoalescePassDoesNotOverwriteBoundVerbs(t *testing.T) {
 
 // TestCoalescePassPrunesOrphans is the focused unit proof of Phase 2: a crudMap
 // key bound to neither a live resource nor a function is dropped, while live
-// resource and function keys survive.
+// resource and function keys survive. The live resource is given a resolvable
+// item path so Phase 1's negative-coverage guard is satisfied.
 func TestCoalescePassPrunesOrphans(t *testing.T) {
 	const resTok = "unifi:sites/v1:FirewallZone"
 	const fnTok = "unifi:sites/v1:getCountrie"
 	const orphanTok = "unifi:sites/v1:FirewallZoneCreateUpdateDto"
+	const coll = "/v1/sites/{siteId}/firewall/zones"
+	const item = coll + "/{id}"
 
 	pkg := &pschema.PackageSpec{
 		Resources: map[string]pschema.ResourceSpec{resTok: {}},
 		Functions: map[string]pschema.FunctionSpec{fnTok: {}},
 	}
-	c := "/v1/sites/{siteId}/firewall/zones"
+	c := coll
 	meta := &openapigen.ProviderMetadata{
 		ResourceCRUDMap: map[string]*openapigen.CRUDOperationsMap{
 			resTok:    {C: &c},
@@ -138,7 +141,10 @@ func TestCoalescePassPrunesOrphans(t *testing.T) {
 		},
 	}
 
-	s := &GenState{Pkg: pkg, Meta: meta, Doc: docWith(nil)}
+	doc := docWith(map[string]*openapi3.PathItem{
+		item: newPathItem(true, false, false, true), // GET + DELETE → R/D coalesce
+	})
+	s := &GenState{Pkg: pkg, Meta: meta, Doc: doc}
 	if err := coalesceDiscriminatedCRUDPass(s); err != nil {
 		t.Fatalf("coalesceDiscriminatedCRUDPass: %v", err)
 	}
@@ -150,5 +156,27 @@ func TestCoalescePassPrunesOrphans(t *testing.T) {
 	}
 	if _, ok := meta.ResourceCRUDMap[fnTok]; !ok {
 		t.Errorf("live function key %q was pruned", fnTok)
+	}
+}
+
+// TestCoalescePassErrorsOnUnresolvableRead is the negative-coverage guard
+// (A-M0.7): a managed resource that stays create-only — its collection path has
+// no resolvable item sibling — is a loud build error, not a silently shipped
+// stub that dies on the next `pulumi up`.
+func TestCoalescePassErrorsOnUnresolvableRead(t *testing.T) {
+	const resTok = "unifi:sites/v1:Unsplittable"
+	pkg := &pschema.PackageSpec{
+		Resources: map[string]pschema.ResourceSpec{resTok: {}},
+		Functions: map[string]pschema.FunctionSpec{},
+	}
+	c := "/v1/sites/{siteId}/unsplittable"
+	meta := &openapigen.ProviderMetadata{
+		ResourceCRUDMap: map[string]*openapigen.CRUDOperationsMap{
+			resTok: {C: &c}, // create-only, and the doc has no item sibling
+		},
+	}
+	s := &GenState{Pkg: pkg, Meta: meta, Doc: docWith(nil)}
+	if err := coalesceDiscriminatedCRUDPass(s); err == nil {
+		t.Error("expected a loud error for a create-only resource with no resolvable read endpoint, got nil")
 	}
 }

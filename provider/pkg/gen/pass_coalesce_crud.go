@@ -1,6 +1,7 @@
 package gen
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -53,27 +54,38 @@ func coalesceDiscriminatedCRUDPass(s *GenState) error {
 		}
 		m := crudMap[tok]
 		if m == nil || m.C == nil {
+			// A managed resource with no create endpoint is itself a defect, but
+			// that is the framework's contract to enforce; we only fill verbs from
+			// a known collection path. Nothing to coalesce here.
 			continue
 		}
+
 		itemPath := findItemPath(doc, *m.C, excluded)
-		if itemPath == "" {
-			continue
+		if itemPath != "" {
+			if item := doc.Paths.Find(itemPath); item != nil {
+				if m.R == nil && item.Get != nil {
+					m.R = strPtr(itemPath)
+				}
+				if m.U == nil && item.Patch != nil {
+					m.U = strPtr(itemPath)
+				}
+				if m.D == nil && item.Delete != nil {
+					m.D = strPtr(itemPath)
+				}
+				if m.P == nil && item.Put != nil {
+					m.P = strPtr(itemPath)
+				}
+			}
 		}
-		item := doc.Paths.Find(itemPath)
-		if item == nil {
-			continue
-		}
-		if m.R == nil && item.Get != nil {
-			m.R = strPtr(itemPath)
-		}
-		if m.U == nil && item.Patch != nil {
-			m.U = strPtr(itemPath)
-		}
-		if m.D == nil && item.Delete != nil {
-			m.D = strPtr(itemPath)
-		}
-		if m.P == nil && item.Put != nil {
-			m.P = strPtr(itemPath)
+
+		// Negative-coverage guard (A-M0.7): a managed resource that still has no
+		// read endpoint after coalescing is a create-only stub that would die on
+		// the next `pulumi up` ("resource read endpoint is unknown"). Fail the
+		// build loudly rather than shipping it. The cause is an entity whose
+		// collection path has no resolvable item sibling (P_coll + "/{param}") —
+		// an unexpected spec shape this pass cannot repair.
+		if m.R == nil {
+			return fmt.Errorf("resource %q is create-only with no resolvable read endpoint: no item path (%s + \"/{param}\") found to coalesce R/U/D/P from", tok, *m.C)
 		}
 	}
 

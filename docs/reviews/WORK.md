@@ -45,7 +45,7 @@ has the detail, grouped by track (= owner = parallel lane).
 | A-M0.4 | Determinism gate → all 4 artifacts | A | 1 | S/M | — | ☑ |
 | A-M0.5 | `info.version` ↔ pin assertion | A | 1 | S | — | ☑ |
 | A-M0.6 | Single source of truth for spec version; fail-not-skip | A | 1 | M | — | ☑ |
-| A-M0.7 | Negative-coverage guard (`R==nil` → loud error) | A | 1 | S | S0.2, A-M0.2 | ☐ |
+| A-M0.7 | Negative-coverage guard (`R==nil` → loud error) | A | 1 | S | S0.2, A-M0.2 | ☑ |
 | A-M0.8 | Dep-pin rationale + "coalesce still needed" test | A | 1 | S | S0.2 | ☐ |
 | A-M0.1 | CI workflow (required checks) | A | 1 | M | soft: A-M0.2..0.8 | ☐ |
 | B-M1.2 | Move `handler`/`callback` globals onto the struct | B | 0 | M | done **with** S0.1 | ☑ |
