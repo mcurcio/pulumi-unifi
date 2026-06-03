@@ -18,6 +18,12 @@ import (
 // Integration API caps a collection's `limit` query parameter at 200.
 const listPageLimit = 200
 
+// maxPagesFallback bounds the follow-up GET count when the server reports no
+// usable totalCount, so a misbehaving controller that returns non-empty pages
+// forever (e.g. ignores offset) cannot hang `pulumi up` or OOM the plugin.
+// 10000 pages × 200 rows = 2M rows — far beyond any real UniFi collection.
+const maxPagesFallback = 10000
+
 // OnPostInvoke aggregates paginated list responses. The framework issues exactly
 // one GET per data-source read (rest/provider.go Invoke), so a collection larger
 // than the server's default page silently returns only the first page — a
@@ -79,7 +85,7 @@ func (p *unifiProvider) OnPostInvoke(ctx context.Context, req *pulumirpc.InvokeR
 		return page, nil
 	}
 
-	return aggregatePages(first, fetch)
+	return aggregatePages(ctx, first, fetch)
 }
 
 // aggregatePages assembles a complete UniFi list response from its first page by
@@ -87,21 +93,41 @@ func (p *unifiProvider) OnPostInvoke(ctx context.Context, req *pulumirpc.InvokeR
 // returns no rows. fetch(offset, limit) yields the decoded page for that window.
 // The returned envelope is the first page with `data` holding every row and
 // count/offset/limit reconciled to the full set. Pure (no HTTP) so the paging
-// loop is unit-testable; the empty-page terminator also bounds a server that
-// reports a totalCount it never fills.
-func aggregatePages(first map[string]interface{}, fetch func(offset, limit int) (map[string]interface{}, error)) (map[string]interface{}, error) {
+// loop is unit-testable.
+//
+// The loop is bounded three ways so a misbehaving controller cannot hang or OOM
+// `pulumi up` (B-M1.1):
+//   - ctx.Err() is checked each iteration, so cancellation/deadline aborts the
+//     aggregate (each GET already carries ctx, but the loop itself must yield);
+//   - a page ceiling caps the number of follow-up GETs — derived from totalCount
+//     when the server reports it (so a server that ignores offset and returns a
+//     full window forever is bounded), else maxPagesFallback.
+//
+// The empty-page terminator still bounds a server that reports a totalCount it
+// never fills.
+func aggregatePages(ctx context.Context, first map[string]interface{}, fetch func(offset, limit int) (map[string]interface{}, error)) (map[string]interface{}, error) {
 	all := toSlice(first["data"])
 	total, hasTotal := toInt(first["totalCount"])
 
-	for {
+	// Hard ceiling on follow-up GETs. With a known total, allow exactly the pages
+	// needed plus a small slack for a partial tail; otherwise the fallback cap.
+	maxPages := maxPagesFallback
+	if hasTotal {
+		maxPages = total/listPageLimit + 2
+	}
+
+	for page := 0; page < maxPages; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if hasTotal && len(all) >= total {
 			break
 		}
-		page, err := fetch(len(all), listPageLimit)
+		decoded, err := fetch(len(all), listPageLimit)
 		if err != nil {
 			return nil, err
 		}
-		rows := toSlice(page["data"])
+		rows := toSlice(decoded["data"])
 		if len(rows) == 0 {
 			break
 		}

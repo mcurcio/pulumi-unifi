@@ -49,7 +49,7 @@ has the detail, grouped by track (= owner = parallel lane).
 | A-M0.8 | Dep-pin rationale + "coalesce still needed" test | A | 1 | S | S0.2 | ☑ |
 | A-M0.1 | CI workflow (required checks) | A | 1 | M | soft: A-M0.2..0.8 | ☐ |
 | B-M1.2 | Move `handler`/`callback` globals onto the struct | B | 0 | M | done **with** S0.1 | ☑ |
-| B-M1.1 | Pagination loop: ceiling + `ctx` + non-advancing guard | B | 1 | S | S0.1 | ☐ |
+| B-M1.1 | Pagination loop: ceiling + `ctx` + non-advancing guard | B | 1 | S | S0.1 | ☑ |
 | B-M1.3 | Go hygiene bundle (errors sweep rides in S0.1; rest after) | B | 0→1 | S/M | S0.1 | ☐ |
 | B-M1.6 | Pagination page-size from spec `limit.maximum` | B | 2 | M | S0.1, metadata capture | ☐ |
 | C-M1.4 | Loud-on-changed-assumptions guards (auth/server/itempath) | C | 1 | S | — | ☐ |

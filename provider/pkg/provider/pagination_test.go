@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -31,7 +32,7 @@ func TestAggregatePagesSinglePage(t *testing.T) {
 		return nil, errors.New("should not fetch when first page is complete")
 	}
 
-	out, err := aggregatePages(first, fetch)
+	out, err := aggregatePages(context.Background(), first, fetch)
 	if err != nil {
 		t.Fatalf("aggregatePages: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestAggregatePagesMultiPage(t *testing.T) {
 		return p, nil
 	}
 
-	out, err := aggregatePages(first, fetch)
+	out, err := aggregatePages(context.Background(), first, fetch)
 	if err != nil {
 		t.Fatalf("aggregatePages: %v", err)
 	}
@@ -116,7 +117,7 @@ func TestAggregatePagesEmptyPageTerminates(t *testing.T) {
 		return map[string]interface{}{"data": []interface{}{}}, nil
 	}
 
-	out, err := aggregatePages(first, fetch)
+	out, err := aggregatePages(context.Background(), first, fetch)
 	if err != nil {
 		t.Fatalf("aggregatePages: %v", err)
 	}
@@ -135,7 +136,7 @@ func TestAggregatePagesFetchError(t *testing.T) {
 		return nil, errors.New("boom")
 	}
 
-	if _, err := aggregatePages(first, fetch); err == nil {
+	if _, err := aggregatePages(context.Background(), first, fetch); err == nil {
 		t.Error("aggregatePages = nil error, want propagated fetch failure")
 	}
 }
@@ -158,7 +159,7 @@ func TestAggregatePagesMissingTotalCount(t *testing.T) {
 		return p, nil
 	}
 
-	out, err := aggregatePages(first, fetch)
+	out, err := aggregatePages(context.Background(), first, fetch)
 	if err != nil {
 		t.Fatalf("aggregatePages: %v", err)
 	}
@@ -167,6 +168,78 @@ func TestAggregatePagesMissingTotalCount(t *testing.T) {
 	}
 	if n, _ := toInt(out["totalCount"]); n != 3 {
 		t.Errorf("totalCount = %v, want backfilled 3", out["totalCount"])
+	}
+}
+
+// TestAggregatePagesKnownTotalCeiling is the B-M1.1 ceiling guard for a known
+// total: a server that ignores offset and echoes a full window forever is bound
+// by the page ceiling (total/listPageLimit + 2) so the loop cannot run away even
+// if len(all) never lines up cleanly with total.
+func TestAggregatePagesKnownTotalCeiling(t *testing.T) {
+	// total is not a clean multiple of listPageLimit, so the assembled count can
+	// overshoot total in one append; the ceiling still bounds the fetch count.
+	const total = 3*listPageLimit + 1
+	first := map[string]interface{}{
+		"data":       rows(0, 1),
+		"totalCount": float64(total),
+	}
+	calls := 0
+	fetch := func(offset, limit int) (map[string]interface{}, error) {
+		calls++
+		return map[string]interface{}{"data": rows(0, listPageLimit)}, nil // offset ignored
+	}
+	if _, err := aggregatePages(context.Background(), first, fetch); err != nil {
+		t.Fatalf("aggregatePages: %v", err)
+	}
+	if ceiling := total/listPageLimit + 2; calls > ceiling {
+		t.Errorf("fetch called %d times, exceeds page ceiling %d (unbounded loop)", calls, ceiling)
+	}
+}
+
+// TestAggregatePagesNoTotalCeiling is the B-M1.1 fallback-ceiling guard: with no
+// totalCount, a server returning non-empty pages forever must still stop —
+// bounded by maxPagesFallback — rather than loop/OOM indefinitely.
+func TestAggregatePagesNoTotalCeiling(t *testing.T) {
+	first := map[string]interface{}{
+		"data": rows(0, 1),
+		// no totalCount
+	}
+	calls := 0
+	fetch := func(offset, limit int) (map[string]interface{}, error) {
+		calls++
+		return map[string]interface{}{"data": rows(offset, offset+1)}, nil // never empty
+	}
+	if _, err := aggregatePages(context.Background(), first, fetch); err != nil {
+		t.Fatalf("aggregatePages: %v", err)
+	}
+	if calls != maxPagesFallback {
+		t.Errorf("fetch called %d times, want exactly the fallback ceiling %d", calls, maxPagesFallback)
+	}
+}
+
+// TestAggregatePagesContextCancelled is the B-M1.1 ctx guard: a cancelled
+// context aborts the loop on the next iteration with the context error, rather
+// than continuing to fetch.
+func TestAggregatePagesContextCancelled(t *testing.T) {
+	first := map[string]interface{}{
+		"data":       rows(0, 2),
+		"totalCount": float64(1000),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled before the first iteration
+
+	fetched := false
+	fetch := func(offset, limit int) (map[string]interface{}, error) {
+		fetched = true
+		return map[string]interface{}{"data": rows(offset, offset+2)}, nil
+	}
+
+	_, err := aggregatePages(ctx, first, fetch)
+	if err == nil {
+		t.Fatal("aggregatePages = nil error, want context cancellation")
+	}
+	if fetched {
+		t.Error("fetched after the context was cancelled")
 	}
 }
 
