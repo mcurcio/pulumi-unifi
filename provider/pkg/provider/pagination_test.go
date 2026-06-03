@@ -1,9 +1,8 @@
 package provider
 
 import (
+	"errors"
 	"testing"
-
-	"github.com/pkg/errors"
 )
 
 // rows builds a slice of n opaque page items labeled by index, mimicking the

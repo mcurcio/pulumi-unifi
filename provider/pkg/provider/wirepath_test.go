@@ -69,11 +69,8 @@ func TestWirePath(t *testing.T) {
 	// bare host:port (no scheme), which is exactly what OnConfigure requires.
 	apiHost := strings.TrimPrefix(srv.URL, "https://")
 
-	// makeProvider installs package-level handler/callback; restore them so the
-	// rest of the package's tests stay hermetic.
-	prevHandler, prevCallback := handler, callback
-	t.Cleanup(func() { handler, callback = prevHandler, prevCallback })
-
+	// makeProvider stores the framework handle on the provider struct (no package
+	// globals), so each test's provider is self-contained — nothing to restore.
 	rp, err := makeProvider(
 		nil, "unifi", "0.0.0-test",
 		readArtifact(t, "schema.json"),

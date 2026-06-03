@@ -12,11 +12,11 @@ import (
 )
 
 // newTestHandler builds a real framework provider from minimal in-memory bytes
-// (just enough to construct the live *http.Client) and installs it as the
-// package-level handler for the duration of the test. This lets OnConfigure
-// tests exercise handler-dependent behavior (transport injection) without the
-// generated schema/metadata artifacts. The previous handler is restored on
-// cleanup so other tests stay hermetic.
+// (just enough to construct the live *http.Client) and stores it on the
+// provider's own handler field. This lets OnConfigure tests exercise
+// handler-dependent behavior (transport injection) without the generated
+// schema/metadata artifacts. The handler lives on the struct, not a package
+// global, so there is nothing to save/restore — each test's provider is its own.
 func newTestHandler(t *testing.T, p *unifiProvider) *fwRest.Provider {
 	t.Helper()
 	const openapiDoc = `{"openapi":"3.1.0","info":{"title":"t","version":"1"},"servers":[{"url":"https://localhost/proxy/network/integration"}],"paths":{}}`
@@ -27,9 +27,7 @@ func newTestHandler(t *testing.T, p *unifiProvider) *fwRest.Provider {
 		t.Fatalf("MakeProvider: %v", err)
 	}
 	h := rp.(*fwRest.Provider)
-	prevHandler, prevCallback := handler, callback
-	handler, callback = h, p
-	t.Cleanup(func() { handler, callback = prevHandler, prevCallback })
+	p.handler = h
 	return h
 }
 

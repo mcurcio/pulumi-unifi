@@ -72,7 +72,7 @@ func SanitizeSpecBytes(data []byte) ([]byte, error) {
 		used[sanitized] = old
 		newSchemas[sanitized] = schemas[old]
 		if sanitized != old {
-			renamedRefs[schemaRefPrefix+old] = schemaRefPrefix+sanitized
+			renamedRefs[schemaRefPrefix+old] = schemaRefPrefix + sanitized
 		}
 	}
 	components["schemas"] = newSchemas

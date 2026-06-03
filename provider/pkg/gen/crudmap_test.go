@@ -146,7 +146,7 @@ func TestDiscriminatedResourcesHaveFullCRUD(t *testing.T) {
 		"unifi:sites/v1:Gateway", "unifi:sites/v1:Switch", "unifi:sites/v1:Unmanaged", // networks
 		"unifi:sites/v1:ARecord", "unifi:sites/v1:AaaaRecord", "unifi:sites/v1:CnameRecord",
 		"unifi:sites/v1:MxRecord", "unifi:sites/v1:SrvRecord", "unifi:sites/v1:TxtRecord",
-		"unifi:sites/v1:ForwardDomain", // dns/policies
+		"unifi:sites/v1:ForwardDomain",              // dns/policies
 		"unifi:sites/v1:Ipv4", "unifi:sites/v1:Mac", // acl-rules
 		"unifi:sites/v1:Ipv4Addresses", "unifi:sites/v1:Ipv6Addresses", "unifi:sites/v1:Ports", // traffic-matching-lists
 	}

@@ -6,9 +6,9 @@ require (
 	github.com/cloudy-sky-software/pulschema v0.0.0-20260425162045-4f93ef0f7fdc
 	github.com/cloudy-sky-software/pulumi-provider-framework v0.0.0-20260425164420-ac1778da4c41
 	github.com/getkin/kin-openapi v0.136.0
-	github.com/pkg/errors v0.9.1
 	github.com/pulumi/pulumi/pkg/v3 v3.230.0
 	github.com/pulumi/pulumi/sdk/v3 v3.230.0
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -89,6 +89,7 @@ require (
 	github.com/pgavlin/fx/v2 v2.0.10 // indirect
 	github.com/pgavlin/goldmark v1.1.33-0.20200616210433-b5eb04559386 // indirect
 	github.com/pjbgf/sha1cd v0.3.2 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/term v1.1.0 // indirect
 	github.com/pulumi/appdash v0.0.0-20231130102222-75f619a67231 // indirect
 	github.com/pulumi/esc v0.23.0 // indirect
@@ -138,7 +139,6 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260406210006-6f92a3bedf2d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260406210006-6f92a3bedf2d // indirect
 	google.golang.org/grpc v1.80.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	lukechampine.com/frand v1.5.1 // indirect
 )

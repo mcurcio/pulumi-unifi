@@ -20,8 +20,6 @@ import (
 
 	"github.com/cloudy-sky-software/pulumi-provider-framework/openapi"
 
-	"github.com/pkg/errors"
-
 	"github.com/pulumi/pulumi/pkg/v3/codegen/schema"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/util/contract"
 
@@ -62,7 +60,7 @@ func main() {
 	case Schema:
 		specBytes, err := os.ReadFile(specPath)
 		if err != nil {
-			panic(errors.Wrapf(err, "reading OpenAPI spec %s", specPath))
+			panic(fmt.Errorf("reading OpenAPI spec %s: %w", specPath, err))
 		}
 
 		// The vendored beezly spec names many component schemas with spaces and
@@ -70,13 +68,13 @@ func main() {
 		// raw bytes before the loader validates them.
 		specBytes, err = providerSchemaGen.SanitizeSpecBytes(specBytes)
 		if err != nil {
-			panic(errors.Wrap(err, "sanitizing OpenAPI spec"))
+			panic(fmt.Errorf("sanitizing OpenAPI spec: %w", err))
 		}
 
 		openAPIDoc := openapi.GetOpenAPISpec(specBytes)
 
 		if err := providerSchemaGen.FixOpenAPIDoc(openAPIDoc); err != nil {
-			panic(errors.Wrap(err, "fixing OpenAPI doc"))
+			panic(fmt.Errorf("fixing OpenAPI doc: %w", err))
 		}
 
 		schemaSpec, metadata, updatedOpenAPIDoc := providerSchemaGen.PulumiSchema(*openAPIDoc)
@@ -85,13 +83,13 @@ func main() {
 
 		metadataBytes, err := json.Marshal(metadata)
 		if err != nil {
-			panic(errors.Wrap(err, "marshaling metadata"))
+			panic(fmt.Errorf("marshaling metadata: %w", err))
 		}
 		mustWriteFile(outDir, "metadata.json", metadataBytes)
 
 		updatedOpenAPIDocBytes, err := yaml.Marshal(updatedOpenAPIDoc)
 		if err != nil {
-			panic(errors.Wrap(err, "marshaling fixed OpenAPI doc"))
+			panic(fmt.Errorf("marshaling fixed OpenAPI doc: %w", err))
 		}
 		mustWriteFile(outDir, "openapi_generated.yml", updatedOpenAPIDocBytes)
 	default:
@@ -105,7 +103,7 @@ func mustWritePulumiSchema(pkgSpec schema.PackageSpec, outDir string) {
 	pkgSpec.Version = ""
 	schemaJSON, err := json.MarshalIndent(pkgSpec, "", "    ")
 	if err != nil {
-		panic(errors.Wrap(err, "marshaling Pulumi schema"))
+		panic(fmt.Errorf("marshaling Pulumi schema: %w", err))
 	}
 	mustWriteFile(outDir, "schema.json", schemaJSON)
 }
