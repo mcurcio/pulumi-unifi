@@ -1,0 +1,81 @@
+# mappings.yaml — the editorial api→pulumi mapping layer, as DATA.
+#
+# This file is the single, reviewable, version-controlled source of truth for the
+# editorial decisions that stabilize the public Pulumi surface across UniFi API
+# spec versions (see docs/reviews/MAPPING-LAYER.md). The gen passes
+# (pass_*.go) are a generic, spec-version-agnostic engine; this file holds the
+# *opinions*. The engine derives a sensible default from the spec wherever it can;
+# this file pins/overrides by exception. Nothing here is Go code.
+#
+# It is //go:embed-ed into the gen binary (loader: mappings.go), so it travels
+# with the build the same way the three generated artifacts travel with the
+# plugin. Editing it changes the generated schema/metadata — review the
+# testdata/tokens.txt golden diff after any change.
+#
+# Contract: an entity/token that this engine cannot derive cleanly AND has no
+# entry here fails the build LOUD ("unmapped entity") rather than shipping a
+# silently-wrong public name.
+
+# excludedPaths lists endpoints that are not clean CRUD resources (RPC-style
+# "actions", list "ordering" mutations, and read-only sub-resource lookups).
+# Feeding them to the auto-grouper produces junk resources, so they are dropped.
+# A dead entry (a path no longer in the spec) is a loud error — see drift_test.go
+# (TestExcludedPathsResolve). This list grows empirically as codegen output is
+# inspected.
+excludedPaths:
+  - /v1/sites/{siteId}/acl-rules/ordering
+  - /v1/sites/{siteId}/firewall/policies/ordering
+  - /v1/sites/{siteId}/clients/{clientId}/actions
+  - /v1/sites/{siteId}/devices/{deviceId}/actions
+  - /v1/sites/{siteId}/devices/{deviceId}/interfaces/ports/{portIdx}/actions
+  - /v1/sites/{siteId}/devices/{deviceId}/statistics/latest
+  - /v1/sites/{siteId}/networks/{networkId}/references
+
+# resources holds the per-entity resource-naming editorial layer.
+#
+# entityPrefixes maps a discriminated entity's collection (create) path to the
+# PascalCase prefix its variant resource tokens get. pulschema splits each
+# oneOf+discriminator body into one resource per variant, naming each token
+# ToPascalCase(discriminatorValue) — bare, context-free (Standard, Mac, Gateway,
+# ARecord). The prefix restores entity context (WifiBroadcastStandard, DnsARecord,
+# ManagedNetworkGateway, TrafficMatchIpv4Addresses). Keyed by the spec collection
+# path so it cannot silently bind to the wrong entity; the engine additionally
+# verifies the collection POST genuinely carries a discriminator before applying
+# (a stale/misapplied prefix is a loud error). These are entity-meaningful names
+# that path-segment derivation alone cannot produce (e.g. /networks →
+# ManagedNetwork not Network; /dns/policies → Dns not DnsPolicy; acl-rules and
+# traffic-matching-lists both → TrafficMatch).
+resources:
+  entityPrefixes:
+    /v1/sites/{siteId}/dns/policies: Dns
+    /v1/sites/{siteId}/wifi/broadcasts: WifiBroadcast
+    /v1/sites/{siteId}/networks: ManagedNetwork
+    /v1/sites/{siteId}/acl-rules: TrafficMatch
+    /v1/sites/{siteId}/traffic-matching-lists: TrafficMatch
+
+# functions holds the function-token normalization editorial layer. The engine
+# derives the bulk mechanically (strip Integration/Dto, PascalCase snake
+# fragments, fix singulars); these tables pin the cases a mechanical rule cannot
+# get right.
+functions:
+  # acronymFixups normalizes all-caps path/operationId acronym fragments to their
+  # PascalCase form when splitting snake_case function tokens.
+  acronymFixups:
+    VPN: Vpn
+
+  # irregularSingulars fixes the naive trailing-"s" stripping that produced broken
+  # singulars (Countrie/Categorie/Policie). Matched as a token suffix so it works
+  # inside a compound name (DpiApplicationCategorie → …Category).
+  irregularSingulars:
+    Countrie: Country
+    Categorie: Category
+    Policie: Policy
+
+  # explicitRenames settles the near-duplicate get/list pairs that a mechanical
+  # rule cannot disambiguate: the verb (get-one vs list-many) is wrong in the
+  # source operationId, and the singular/plural entity differs. Kept explicit
+  # because these are genuinely irregular (the spec mislabels a get-one as `list`).
+  explicitRenames:
+    listTrafficMatching: getTrafficMatchingList # get-one (R = …/{id})
+    listTrafficMatchings: listTrafficMatchingLists # list-all
+    getFirewallPolicie: listFirewallPolicies # list-all (counterpart of getFirewallPolicy)

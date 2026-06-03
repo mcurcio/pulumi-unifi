@@ -14,10 +14,11 @@ import (
 //     parent entity so they carry context: WifiBroadcastStandard, DnsARecord,
 //     ManagedNetworkGateway, TrafficMatchIpv4Addresses. The prefix is keyed off
 //     the resource's create (collection) path — the stable, spec-derived entity
-//     identity — via the small declarative entityPrefixes table (the editorial
-//     surface, like excludedPaths). A resource is prefixed only when its
-//     collection POST actually carries a discriminator, so a flat resource that
-//     happens to share a collection path is never mis-prefixed.
+//     identity — via the data-driven entityPrefixes table in mappings.yaml (the
+//     editorial layer is DATA, not Go; see MAPPING-LAYER.md). A resource is
+//     prefixed only when its collection POST actually carries a discriminator, so
+//     a flat resource that happens to share a collection path is never
+//     mis-prefixed; an unmapped discriminated entity fails loud.
 //
 //   - Functions (D-M2.3): the operationId-derived function tokens are full of
 //     upstream garbage — internal DTO names (getIntegrationDnsARecordDto),
@@ -26,9 +27,8 @@ import (
 //     confusion (listTrafficMatching is actually a get-one). normalizeFunction
 //     cleans these deterministically by string transform: strip Integration/Dto,
 //     PascalCase snake fragments (normalizing acronyms), fix irregular plurals
-//     from one exceptions table, and apply a few explicit get/list settlements
-//     for the near-duplicate pairs. The `*Page` list tokens are intentionally
-//     left to the dedicated de-page pass (D-M2.5).
+//     and apply the explicit get/list settlements — all pinned in mappings.yaml.
+//     The `*Page` list tokens are intentionally left to the de-page pass (D-M2.5).
 //
 // Renaming a token rewrites every token-keyed map in lockstep (Pkg.Resources /
 // Pkg.Functions, Meta.ResourceCRUDMap, Meta.AutoNameMap); nothing in the schema
@@ -45,22 +45,21 @@ func tokenRenamePass(s *GenState) error {
 	return renameFunctions(s)
 }
 
-// entityPrefixes maps a discriminated entity's collection (create) path to the
-// PascalCase prefix its variant resource tokens get. This is the one declarative
-// editorial table for resource naming (analogous to excludedPaths): the prefixes
-// are entity-meaningful names that path-segment derivation alone cannot produce
-// (e.g. /networks → ManagedNetwork, not Network; /dns/policies → Dns, not
-// DnsPolicy; acl-rules and traffic-matching-lists both → TrafficMatch). Keyed by
-// the spec collection path so it cannot silently bind to the wrong entity.
-var entityPrefixes = map[string]string{
-	"/v1/sites/{siteId}/dns/policies":           "Dns",
-	"/v1/sites/{siteId}/wifi/broadcasts":        "WifiBroadcast",
-	"/v1/sites/{siteId}/networks":               "ManagedNetwork",
-	"/v1/sites/{siteId}/acl-rules":              "TrafficMatch",
-	"/v1/sites/{siteId}/traffic-matching-lists": "TrafficMatch",
-}
+// The resource-naming editorial table (entity prefixes per discriminated
+// collection path) lives in mappings.yaml and is read via entityPrefix() — the
+// engine derives by default, the data file pins by exception. See
+// docs/reviews/MAPPING-LAYER.md.
 
 // renameResources entity-prefixes the discriminated-variant resource tokens.
+//
+// Derive-by-default, pin-by-exception with a LOUD failure on the gap: a resource
+// whose create body carries a discriminator (pulschema split it into bare,
+// context-free per-variant tokens like Standard/Mac) but whose collection path
+// has no entityPrefix mapping is an *unmapped entity* — its public token name
+// would be an un-pinned, context-free, collision-prone string. Rather than ship
+// that silently, the pass errors so a spec bump that introduces a new
+// discriminated entity forces a deliberate mappings.yaml entry. A flat
+// (non-discriminated) resource needs no prefix and is left as-is.
 func renameResources(s *GenState) error {
 	crudMap := s.Meta.ResourceCRUDMap
 	doc := s.Doc
@@ -70,18 +69,24 @@ func renameResources(s *GenState) error {
 		if m == nil || m.C == nil {
 			continue
 		}
-		prefix, ok := entityPrefixes[*m.C]
-		if !ok {
-			continue // not a prefixed entity
-		}
-		// Guard: only prefix genuine discriminated variants. If this collection's
-		// POST body has no discriminator, the prefix table is stale/misapplied.
 		_, _, isDisc, err := deriveDiscriminator(doc, tok, *m.C)
 		if err != nil {
 			return err
 		}
+
+		prefix, ok := entityPrefix(*m.C)
+		if !ok {
+			if isDisc {
+				// Unmapped discriminated entity: bare per-variant token would ship
+				// un-pinned. Fail loud (MAPPING-LAYER.md acceptance criterion).
+				return fmt.Errorf("token-rename: unmapped entity — resource %q's create collection %q carries a discriminator (per-variant split) but has no entityPrefix in mappings.yaml; add one so its public token name is pinned", tok, *m.C)
+			}
+			continue // flat resource — no prefix needed
+		}
+		// Guard: a prefix entry must point at a genuinely discriminated entity. If
+		// this collection's POST body has no discriminator, the table is stale.
 		if !isDisc {
-			return fmt.Errorf("token-rename: entityPrefixes has %q for collection %q but resource %q's create body carries no discriminator (stale prefix table?)", prefix, *m.C, tok)
+			return fmt.Errorf("token-rename: mappings.yaml entityPrefix %q for collection %q but resource %q's create body carries no discriminator (stale prefix entry?)", prefix, *m.C, tok)
 		}
 
 		mod, short := splitToken(tok)
@@ -112,39 +117,17 @@ func renameFunctions(s *GenState) error {
 	return nil
 }
 
-// acronymFixups normalizes all-caps path/operationId acronym fragments to their
-// PascalCase form when splitting snake_case function tokens. One small
-// declarative table.
-var acronymFixups = map[string]string{
-	"VPN": "Vpn",
-}
-
-// irregularSingulars fixes the naive trailing-"s" stripping that produced broken
-// singulars (Countrie/Categorie/Policie). One small declarative exceptions table
-// (the brief's "irregular-plural exceptions table"), matched as a token suffix so
-// it works inside a compound name (DpiApplicationCategorie → …Category).
-var irregularSingulars = map[string]string{
-	"Countrie":  "Country",
-	"Categorie": "Category",
-	"Policie":   "Policy",
-}
-
-// explicitFunctionRenames settles the F5 near-duplicate get/list pairs that a
-// mechanical rule cannot disambiguate: the verb (get-one vs list-many) is wrong
-// in the source operationId, and the singular/plural entity differs. Kept as an
-// explicit one-place table because these are genuinely irregular (the spec
-// mislabels a get-one as `list`).
-var explicitFunctionRenames = map[string]string{
-	"listTrafficMatching":  "getTrafficMatchingList",   // get-one (R = …/{id})
-	"listTrafficMatchings": "listTrafficMatchingLists", // list-all
-	"getFirewallPolicie":   "listFirewallPolicies",     // list-all (counterpart of getFirewallPolicy)
-}
+// The function-name editorial tables (acronym fixups, irregular singulars, and
+// the explicit get/list near-duplicate settlements) all live in mappings.yaml
+// and are read via the accessors in mappings.go — the engine derives the bulk
+// mechanically (strip Integration/Dto, PascalCase snake fragments), the data
+// file pins only what a rule cannot get right. See docs/reviews/MAPPING-LAYER.md.
 
 var funcVerbRE = regexp.MustCompile(`^(get|list)(.*)$`)
 
 // normalizeFunction cleans one function token's short name. See tokenRenamePass.
 func normalizeFunction(short string) string {
-	if repl, ok := explicitFunctionRenames[short]; ok {
+	if repl, ok := explicitFunctionRename(short); ok {
 		return repl
 	}
 	m := funcVerbRE.FindStringSubmatch(short)
@@ -174,7 +157,7 @@ func pascalizeSnake(s string) string {
 		if p == "" {
 			continue
 		}
-		if fixed, ok := acronymFixups[strings.ToUpper(p)]; ok {
+		if fixed, ok := acronymFixup(strings.ToUpper(p)); ok {
 			b.WriteString(fixed)
 			continue
 		}
@@ -189,11 +172,13 @@ func pascalizeSnake(s string) string {
 }
 
 // fixIrregularSingular repairs a broken-singular suffix from the exceptions
-// table (Countrie → Country, Policie → Policy, Categorie → Category).
+// table in mappings.yaml (Countrie → Country, Policie → Policy, Categorie →
+// Category). Iterated over sorted keys for determinism.
 func fixIrregularSingular(s string) string {
-	for _, bad := range sortedKeys(irregularSingulars) {
+	singulars := irregularSingularMap()
+	for _, bad := range sortedKeys(singulars) {
 		if strings.HasSuffix(s, bad) {
-			return strings.TrimSuffix(s, bad) + irregularSingulars[bad]
+			return strings.TrimSuffix(s, bad) + singulars[bad]
 		}
 	}
 	return s

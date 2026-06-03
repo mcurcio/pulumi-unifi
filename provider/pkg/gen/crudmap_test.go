@@ -44,7 +44,7 @@ func runPulschemaRaw(t *testing.T) (pschema.PackageSpec, *openapigen.ProviderMet
 	openAPICtx := &openapigen.OpenAPIContext{
 		Doc:           *doc,
 		Pkg:           &pkg,
-		ExcludedPaths: excludedPaths,
+		ExcludedPaths: mappingExcludedPaths(),
 	}
 	meta, _, err := openAPICtx.GatherResourcesFromAPI(map[string]string{
 		packageName: "Unifi",

@@ -20,20 +20,6 @@ func SpecFileName() string {
 	return "unifi-network-" + PinnedSpecVersion + ".json"
 }
 
-// excludedPaths lists endpoints that are not clean CRUD resources (RPC-style
-// "actions", list "ordering" mutations, and read-only sub-resource lookups).
-// Feeding them to the auto-grouper produces junk resources, so they are dropped.
-// This list grows empirically as codegen output is inspected.
-var excludedPaths = []string{
-	"/v1/sites/{siteId}/acl-rules/ordering",
-	"/v1/sites/{siteId}/firewall/policies/ordering",
-	"/v1/sites/{siteId}/clients/{clientId}/actions",
-	"/v1/sites/{siteId}/devices/{deviceId}/actions",
-	"/v1/sites/{siteId}/devices/{deviceId}/interfaces/ports/{portIdx}/actions",
-	"/v1/sites/{siteId}/devices/{deviceId}/statistics/latest",
-	"/v1/sites/{siteId}/networks/{networkId}/references",
-}
-
 // configKey describes one provider config property in a single place, so the
 // schema's Config.Variables and Provider.InputProperties cannot drift apart. The
 // only field that differs between the two views is the env-var fallback, which

@@ -165,7 +165,7 @@ func TestSpecInfoVersionMatchesPin(t *testing.T) {
 // stops dropping anything (re-leaking a junk resource).
 func TestExcludedPathsResolve(t *testing.T) {
 	doc := fixedDoc(t)
-	for _, p := range excludedPaths {
+	for _, p := range mappingExcludedPaths() {
 		if doc.Paths.Find(p) == nil {
 			t.Errorf("excludedPaths entry %q no longer matches any spec path (dead exclusion — re-check on spec bump)", p)
 		}

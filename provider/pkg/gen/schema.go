@@ -1,12 +1,14 @@
 // Package gen turns the vendored UniFi OpenAPI spec into a Pulumi package
 // schema + CRUD metadata via pulschema. Resource grouping/CRUD mapping is
 // auto-derived by pulschema from the REST path shape and verbs; the editorial
-// surface here is the provider config, the OpenAPIContext, and ExcludedPaths.
+// surface is the provider config and the data-driven mapping layer
+// (mappings.yaml — exclusions, token renames; loaded by mappings.go).
 //
 // schema.go is orchestration only: it assembles the static package identity
 // (packagespec.go), runs pulschema, and applies the post-process passes
-// (genstate.go / pass_*.go). The static PackageSpec literal, the config block,
-// and excludedPaths live in packagespec.go.
+// (genstate.go / pass_*.go). The static PackageSpec literal and the config block
+// live in packagespec.go; all editorial api→pulumi mappings (exclusions, token
+// naming) live in mappings.yaml (data, not code — see MAPPING-LAYER.md).
 package gen
 
 import (
@@ -37,7 +39,7 @@ func PulumiSchema(openAPIDoc openapi3.T) (pschema.PackageSpec, openapigen.Provid
 	openAPICtx := &openapigen.OpenAPIContext{
 		Doc:           openAPIDoc,
 		Pkg:           &pkg,
-		ExcludedPaths: excludedPaths,
+		ExcludedPaths: mappingExcludedPaths(),
 	}
 
 	providerMetadata, updatedOpenAPIDoc, err := openAPICtx.GatherResourcesFromAPI(csharpNamespaces)

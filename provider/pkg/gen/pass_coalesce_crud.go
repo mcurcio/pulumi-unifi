@@ -41,8 +41,9 @@ func coalesceDiscriminatedCRUDPass(s *GenState) error {
 	doc := s.Doc
 	pkg := s.Pkg
 
-	excluded := make(map[string]bool, len(excludedPaths))
-	for _, p := range excludedPaths {
+	paths := mappingExcludedPaths()
+	excluded := make(map[string]bool, len(paths))
+	for _, p := range paths {
 		excluded[p] = true
 	}
 
