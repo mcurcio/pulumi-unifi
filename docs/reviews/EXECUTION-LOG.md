@@ -101,3 +101,38 @@ and against a warm stack; no crudMap key was broken by the renames). `make
 python_sdk` regenerated; reference shapes captured for the orchestrator review.
 
 STOP for human UX review of the produced shape before D-M2.4..2.7 / D-M3.* proceed.
+
+## S0.5 — mappings-as-data refactor (byte-identical; do before Track-D Phase 2)
+
+Externalized the editorial api→pulumi mapping layer to DATA per
+docs/reviews/MAPPING-LAYER.md. New `provider/pkg/gen/mappings.yaml`
+(`//go:embed`-ed) + loader `mappings.go` (parse-once via sync.Once, contract.Failf
+on garbled/empty embed). The four Go-literal maps the Track-D Phase-1 passes added
+(entityPrefixes 5, irregularSingulars 3, acronymFixups 1, explicitFunctionRenames
+3) plus the `excludedPaths` exclusion list (7 entries) all moved into the YAML;
+the passes (pass_token_rename.go, pass_coalesce_crud.go) + schema.go + the two
+tests that referenced the literals now read through accessors (mappingExcludedPaths,
+entityPrefix, acronymFixup, irregularSingularMap, explicitFunctionRename). Zero
+naming/const/plural/exclusion literals remain in non-test Go.
+
+Loud-on-gap (MAPPING-LAYER acceptance): renameResources now fails with "unmapped
+entity" when a discriminated entity (create body carries a discriminator → bare
+per-variant token) has no entityPrefix pin — instead of silently shipping an
+un-pinned, context-free public token. A flat unmapped resource is still left
+untouched (guard fires only for discriminated entities). Verified all 5 current
+discriminated collections (/dns/policies, /networks, /acl-rules,
+/traffic-matching-lists, /wifi/broadcasts) are mapped, so the guard changes no
+output today.
+
+- S0.5 | ☑ | 831d152 | mappings.yaml + mappings.go + mappings_test.go; refactored
+  packagespec.go (drop excludedPaths literal), schema.go, pass_coalesce_crud.go,
+  pass_token_rename.go, crudmap_test.go, drift_test.go. New tests: TestMappingsLoad,
+  TestMappingsExcludedPathsMatchSpec, TestRenameResourcesUnmappedEntityFailsLoud
+  (RED-when-broken verified then reverted), TestRenameResourcesFlatUnmappedIsFine.
+
+Verification (the byte-identical bar, meaningful only pre-Phase-2): make
+generate_schema → schema.json/metadata.json/openapi_generated.yml ALL byte-identical
+to the saved baseline; tokens.txt golden UNCHANGED; make build + make test +
+go test -race ./... green; go vet + gofmt -l clean; double make generate_schema →
+3 artifacts byte-identical; make test-mock (Docker healthy) → read + write dispatch
+smoke PASS.
