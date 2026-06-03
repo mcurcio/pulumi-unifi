@@ -1,0 +1,96 @@
+name: CI
+
+# The provider is generated from a pinned spec; the core risk is a spec/dep bump
+# silently changing output. These jobs are the safety net (Track A): the unit +
+# determinism gate, the SDK regeneration/import checks, and the Dockerized mock
+# tier. Mark `test`, `determinism`, and `sdk-smoke` as required status checks.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # Codegen tests fail (not skip) on a missing spec when CI is set (A-M0.6).
+  CI: "true"
+  GO_VERSION: "1.26"
+
+jobs:
+  # No-Docker default gate: codegen determinism + sanitization + fix-layer guards
+  # + provider callbacks + token-set drift, plus vet and gofmt.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: provider/go.sum
+      - name: gofmt
+        working-directory: provider
+        run: |
+          unformatted="$(gofmt -l pkg/ cmd/)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needs to run on:"; echo "$unformatted"; exit 1
+          fi
+      - name: go vet
+        working-directory: provider
+        run: go vet ./...
+      - name: make test (fetch spec + unit + determinism)
+        run: make test
+
+  # Determinism over the full artifact set (A-M0.4): generate twice and require an
+  # empty git diff over the generated SDK (TestPipelineDeterministic already covers
+  # schema.json/metadata.json/openapi_generated.yml in-process, but the SDK is
+  # produced out-of-process by `pulumi package gen-sdk`).
+  determinism:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: provider/go.sum
+      - uses: pulumi/actions@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: generate twice and diff the SDK
+        run: |
+          make generate
+          mv sdk /tmp/sdk-run1
+          make generate
+          diff -r /tmp/sdk-run1 sdk
+
+  # Python SDK smoke test (E-M4.5): regenerate, install, import, assert the class
+  # set incl. a discriminated variant.
+  sdk-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: provider/go.sum
+      - uses: pulumi/actions@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: make test-sdk
+        run: make test-sdk
+
+  # Tier-1 mock tier (Docker): read + write dispatch through the real provider over
+  # TLS against the Prism mock. Separate job because it needs Docker.
+  test-mock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: provider/go.sum
+      - name: make test-mock
+        run: make test-mock
