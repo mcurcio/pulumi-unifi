@@ -60,7 +60,7 @@ has the detail, grouped by track (= owner = parallel lane).
 | D-M2.3 | `pass_token_rename.go` — normalization (Dto/singular/case/get-list) | D | 2 | M/L | D-M2.2 (same file) | ☑ |
 | D-M2.4 | `pass_descriptions.go` — synthesize descriptions | D | 2 | M | S0.2, A-M0.2 | ☑ |
 | D-M2.5 | `pass_depage.go` — de-pageify list data sources | D | 2 | M | S0.2, A-M0.2 | ☑ |
-| D-M2.6 | `pass_prune_getters.go` — prune redundant DTO getters | D | 2 | S/M | S0.2, A-M0.2 | ☐ |
+| D-M2.6 | ~~prune redundant getters~~ — **DROPPED**: keep per-variant getters (symmetric with shape-b resources; preserves typed reads) | D | 2 | — | — | ✗ |
 | D-M2.7 | `pass_enum.go` — dedup + preserve numeric + prune empty types | D | 2 | M | S0.2, A-M0.2 | ☐ |
 | D-M3.1 | `pass_replace_on_changes.go` — identity/immutable fields | D | 2 | M | S0.2, A-M0.2 | ☐ |
 | D-M3.2 | Per-resource `siteId`: honor or remove (cross-cutting) | D | 2 | M | S0.1, S0.2, A-M0.2 | ☐ |
@@ -339,9 +339,13 @@ to tagged-union resources (part of G-U1's design space) — hard to change post-
 - **Source:** 03-F7 · Rename `*Page`→plural list; drop `limit`/`offset` from the aggregated result
   type. **Accept:** no `*Page` tokens; no stale paging knobs in the result.
 
-#### D-M2.6 — `pass_prune_getters.go` · Wave 2 · S/M
-- **Source:** 01-H5, 03-F3 · Keep one canonical item getter + list getter per endpoint; drop the
-  per-variant DTO getters. **Accept:** function count drops; no two getters bind the identical endpoint.
+#### D-M2.6 — ~~prune redundant getters~~ — **DROPPED** (decision 2026-06-03)
+- **Source:** 01-H5, 03-F3 proposed pruning per-variant getters to one canonical per endpoint.
+- **Why dropped:** the review predates the shape-(b) per-variant *resource* decision. The variant
+  getters share an *endpoint* but return *different typed shapes*, mirroring the per-variant resources
+  — pruning to one canonical would be asymmetric and would lose typed reads of the other variants
+  (e.g. reading a CNAME via `getDnsARecord`, or a wireless client when only `getWiredClientDetails`
+  survives). Keeping per-variant getters is the consistent, symmetric model. Implementor work reverted.
 
 #### D-M2.7 — `pass_enum.go` · Wave 2 · M
 - **Source:** 03-F9/F11, 01-L1, 04-F10 · De-dup identical enums; preserve numeric enums (or rely on

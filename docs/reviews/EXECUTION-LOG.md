@@ -140,3 +140,4 @@ smoke PASS.
 ## Track-D Phase 2 — coordinator-driven (one implementor per pass)
 - D-M2.4 `108a57e` descriptions — committed by prior run; status flipped here.
 - D-M2.5 `d40e276` de-page — prior run wrote pass_depage.go; coordinator finished it (added pass_depage_test.go, rebased golden, `go mod tidy`), verified: unit gate green, golden 16 get*Page->list* renames, `make test-mock` green (first run hit the known Caddy/Prism startup race; green on ready stack).
+- D-M2.6 DROPPED (coordinator + maintainer decision): pruning per-variant getters to one canonical is asymmetric with shape-(b) per-variant resources and loses typed reads of other variants. Implementor work (pass_prune_getters.go + mappings canonicalGetters) reverted; tree restored to eded499 with all per-variant getters intact.
