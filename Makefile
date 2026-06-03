@@ -83,6 +83,13 @@ test-mock:: build
 	set -e; \
 	trap 'docker compose -f $(MOCK_COMPOSE) down' EXIT; \
 	docker compose -f $(MOCK_COMPOSE) up -d --wait; \
+	echo "waiting for the mock to serve through TLS (Prism boot lags container state)..."; \
+	ready=; \
+	for i in $$(seq 1 60); do \
+		code=$$(curl -sk -o /dev/null -w '%{http_code}' --max-time 2 https://127.0.0.1:8443/proxy/network/integration/v1/sites/default/wifi/broadcasts || echo 000); \
+		case "$$code" in 000|502|503|504) sleep 0.5 ;; *) echo "mock ready (HTTP $$code, attempt $$i)"; ready=1; break ;; esac; \
+	done; \
+	[ -n "$$ready" ] || { echo "ERROR: mock not ready on https://127.0.0.1:8443 (last HTTP $$code)"; exit 1; }; \
 	UNIFI_MOCK_ADDR=127.0.0.1:8443 \
 		go -C provider test -tags integration -count=1 -run 'TestReadPathAgainstMock|TestWritePathAgainstMock' ./pkg/provider/
 
