@@ -104,6 +104,61 @@ func fixedDoc(t *testing.T) *openapi3.T {
 	return doc
 }
 
+// TestPinnedSpecVersionMatchesPinEnv asserts the Go-side PinnedSpecVersion
+// constant equals SPEC_VERSION in openapi/pin.env (the single source of truth).
+// A half-finished bump (one changed, the other not) fails here instead of
+// silently generating from a mismatched spec filename/assertion. (A-M0.6)
+func TestPinnedSpecVersionMatchesPinEnv(t *testing.T) {
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	var pinEnv string
+	for {
+		candidate := filepath.Join(dir, "openapi", "pin.env")
+		if _, err := os.Stat(candidate); err == nil {
+			pinEnv = candidate
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("openapi/pin.env not found walking up from working dir")
+		}
+		dir = parent
+	}
+
+	b, err := os.ReadFile(pinEnv)
+	if err != nil {
+		t.Fatalf("read %s: %v", pinEnv, err)
+	}
+	var want string
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "SPEC_VERSION="); ok {
+			want = strings.TrimSpace(v)
+			break
+		}
+	}
+	if want == "" {
+		t.Fatalf("SPEC_VERSION not found in %s", pinEnv)
+	}
+	if PinnedSpecVersion != want {
+		t.Errorf("PinnedSpecVersion = %q but pin.env SPEC_VERSION = %q — a version bump must update both", PinnedSpecVersion, want)
+	}
+}
+
+// TestSpecInfoVersionMatchesPin asserts the fetched spec's info.version equals
+// the pinned version — the same cross-check the codegen entrypoint panics on
+// (A-M0.5), here as a default-gate test so it is exercised even without a build.
+func TestSpecInfoVersionMatchesPin(t *testing.T) {
+	doc := fixedDoc(t)
+	if doc.Info == nil {
+		t.Fatal("spec has no info block")
+	}
+	if doc.Info.Version != PinnedSpecVersion {
+		t.Errorf("spec info.version = %q, want pinned %q (wrong spec fetched?)", doc.Info.Version, PinnedSpecVersion)
+	}
+}
+
 // TestExcludedPathsResolve is the dead-entry guard (A-M0.3): every excludedPaths
 // entry must still match a path in the spec pulschema sees. A removed or renamed
 // path in a spec bump would otherwise leave a stale exclusion that silently

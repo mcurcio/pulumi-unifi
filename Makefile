@@ -10,7 +10,12 @@ PROVIDER_PKG := github.com/mcurcio/pulumi-unifi/provider
 VERSION_PATH := $(PROVIDER_PKG)/pkg/version.Version
 
 WORKING_DIR  := $(shell pwd)
-SPEC         := openapi/unifi-network-10.4.57.json
+
+# Single source of truth for the pinned spec version (openapi/pin.env, also
+# sourced by openapi/fetch.sh). The spec filename derives from it, so a version
+# bump touches only pin.env.
+include openapi/pin.env
+SPEC         := openapi/unifi-network-$(SPEC_VERSION).json
 GEN_DIR      := provider/cmd/pulumi-resource-$(PACK)
 SCHEMA_FILE  := $(GEN_DIR)/schema.json
 BIN          := $(WORKING_DIR)/bin

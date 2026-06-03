@@ -6,6 +6,20 @@ import (
 
 const packageName = "unifi"
 
+// PinnedSpecVersion is the Go-side mirror of SPEC_VERSION in openapi/pin.env (the
+// single source of truth for the pinned spec). It feeds the codegen entrypoint's
+// default spec filename and the spec's info.version assertion. A test
+// (TestPinnedSpecVersionMatchesPinEnv) asserts this equals the pin.env value, so
+// a half-finished bump — version changed in pin.env but not here, or vice versa —
+// fails CI instead of silently generating from a mismatched spec.
+const PinnedSpecVersion = "10.4.57"
+
+// SpecFileName is the pinned spec's filename (a build artifact fetched by
+// openapi/fetch.sh), derived from the version so callers never re-hardcode it.
+func SpecFileName() string {
+	return "unifi-network-" + PinnedSpecVersion + ".json"
+}
+
 // excludedPaths lists endpoints that are not clean CRUD resources (RPC-style
 // "actions", list "ordering" mutations, and read-only sub-resource lookups).
 // Feeding them to the auto-grouper produces junk resources, so they are dropped.

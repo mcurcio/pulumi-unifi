@@ -15,16 +15,21 @@ import (
 
 // findSpec walks up from the test's working directory to locate the pinned
 // OpenAPI spec at the repo root, so the test is independent of where `go test`
-// is invoked from. The spec is a build artifact (fetched by `make fetch`, not
-// committed); if it is absent the test skips with that instruction rather than
-// failing — `make test` fetches it first.
+// is invoked from. The spec filename derives from the single-source pin
+// (gen.SpecFileName), so it can never disagree with fetch.sh/the Makefile.
+//
+// The spec is a build artifact (fetched by `make fetch`, not committed). When it
+// is absent the behavior is environment-dependent: in CI (CI env var set) a
+// missing spec is a hard t.Fatalf so a broken fetch can't pass as a green skip;
+// locally it is a t.Skipf with the fetch instruction so a bare `go test` is
+// graceful (`make test` fetches first).
 func findSpec(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	const rel = "openapi/unifi-network-10.4.57.json"
+	rel := filepath.Join("openapi", SpecFileName())
 	for {
 		candidate := filepath.Join(dir, rel)
 		if _, err := os.Stat(candidate); err == nil {
@@ -32,7 +37,11 @@ func findSpec(t *testing.T) string {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Skipf("pinned spec %s not found; run `make fetch` (it is a build artifact, not committed)", rel)
+			msg := "pinned spec %s not found; run `make fetch` (it is a build artifact, not committed)"
+			if os.Getenv("CI") != "" {
+				t.Fatalf(msg, rel)
+			}
+			t.Skipf(msg, rel)
 		}
 		dir = parent
 	}

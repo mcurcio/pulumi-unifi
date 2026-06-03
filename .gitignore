@@ -42,6 +42,9 @@ venv/
 *.env
 .env.*
 !.env.example
+# openapi/pin.env is the committed pin manifest (spec version/SHA/checksum — the
+# single source of truth), NOT a secret. Force-track it past the *.env rule.
+!openapi/pin.env
 
 # --- Test harness (generated TLS material) ---
 test/mock/certs/

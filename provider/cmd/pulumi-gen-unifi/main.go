@@ -46,7 +46,7 @@ func main() {
 	var specPath string
 	var outDir string
 	flag.StringVar(&version, "version", providerVersion.Version, "provider version to record in generated code")
-	flag.StringVar(&specPath, "spec", filepath.Join("openapi", "unifi-network-10.4.57.json"), "path to the pinned OpenAPI spec (fetched at build by openapi/fetch.sh)")
+	flag.StringVar(&specPath, "spec", filepath.Join("openapi", providerSchemaGen.SpecFileName()), "path to the pinned OpenAPI spec (fetched at build by openapi/fetch.sh)")
 	flag.StringVar(&outDir, "out", filepath.Join("provider", "cmd", "pulumi-resource-unifi"), "directory to write generated artifacts into")
 	flag.Parse()
 
@@ -72,6 +72,18 @@ func main() {
 		}
 
 		openAPIDoc := openapi.GetOpenAPISpec(specBytes)
+
+		// Assert the fetched bytes actually contain the pinned version. fetch.sh
+		// verifies the sha256, but a mis-edited SHA that resolves to a different
+		// (yet self-consistent) spec would otherwise generate silently from the
+		// wrong API version. info.version is the only in-band tell.
+		if openAPIDoc.Info == nil || openAPIDoc.Info.Version != providerSchemaGen.PinnedSpecVersion {
+			got := "<no info.version>"
+			if openAPIDoc.Info != nil {
+				got = openAPIDoc.Info.Version
+			}
+			panic(fmt.Errorf("spec info.version %q does not match the pinned version %q (wrong spec fetched? bump openapi/pin.env)", got, providerSchemaGen.PinnedSpecVersion))
+		}
 
 		if err := providerSchemaGen.FixOpenAPIDoc(openAPIDoc); err != nil {
 			panic(fmt.Errorf("fixing OpenAPI doc: %w", err))
