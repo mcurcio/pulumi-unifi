@@ -93,6 +93,15 @@ functions:
 # descriptions state that honestly so the non-declarative semantics are documented
 # rather than hidden.
 descriptions:
+  # inputs pins the description of a well-known input property shared across many
+  # resources, where the property is synthesized from a path parameter and so
+  # carries no spec description of its own. siteId is the per-resource site-scope
+  # override: the framework's getPathParamsMap resolves {siteId} from a resource's
+  # own inputs first, falling back to the provider-global siteId only when absent
+  # (D-M3.2), so setting it on a resource moves that resource to another site. It
+  # is marked immutableFields below, so changing it forces a replacement.
+  inputs:
+    siteId: Overrides the provider-level site for this resource. Changing it moves the resource to another site (a replacement).
   resources:
     # DNS record variants (collection summary "Create DNS Policy" is ambiguous).
     DnsARecord: An A DNS record (maps a domain to an IPv4 address) managed via the UniFi DNS policy API.
@@ -157,9 +166,13 @@ enums:
 # exception). A name no resource carries is a loud error (dead pin — see
 # pass_replace_on_changes_test.go), so it cannot silently rot across a spec bump.
 #
-# siteId is DELIBERATELY ABSENT: its fate (honored per-resource vs removed) and its
-# replace semantics are owned by D-M3.2, not this pass.
 immutableFields:
   # A network's VLAN ID is identity: the API treats a VLAN change as a different
   # network, not an in-place edit. Present only on the ManagedNetwork* variants.
   - vlanId
+  # siteId is the per-resource site-scope override (D-M3.2). The framework honors a
+  # resource-level siteId over the provider-global one, but the UniFi API has no
+  # "move resource to another site" edit — changing it must recreate the resource
+  # in the new site. Present on every resource (the {siteId} path param), so this
+  # pin marks them all replaceOnChanges.
+  - siteId

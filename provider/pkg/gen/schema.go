@@ -121,11 +121,12 @@ var passes = []pass{
 	{name: "descriptions", fn: descriptionsPass},
 	{name: "mark-secret-fields", fn: markSecretFieldsPass},
 	// Annotation: mark immutable/identity inputs replaceOnChanges (spec-readOnly ∪
-	// discriminator const ∪ mappings.yaml immutableFields pins). Runs last — after
-	// naming/types are final and the discriminator const is pinned — because it only
-	// annotates the shipped resource set (no token/type edits). Excludes siteId
-	// (D-M3.2 owns its replace semantics). Touches PropertySpec.ReplaceOnChanges
-	// only — orthogonal to descriptions (Description) and mark-secret-fields (Secret).
+	// discriminator const ∪ mappings.yaml immutableFields pins, incl. siteId — its
+	// per-resource site-scope override recreates the resource, D-M3.2). Runs last —
+	// after naming/types are final and the discriminator const is pinned — because it
+	// only annotates the shipped resource set (no token/type edits). Touches
+	// PropertySpec.ReplaceOnChanges only — orthogonal to descriptions (Description)
+	// and mark-secret-fields (Secret).
 	{name: "replace-on-changes", fn: replaceOnChangesPass},
 }
 

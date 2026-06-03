@@ -62,16 +62,26 @@ func TestReplaceOnChangesMarksDiscriminator(t *testing.T) {
 	}
 }
 
-// TestReplaceOnChangesExcludesSiteId is the negative guard: this pass must NEVER
-// mark siteId replaceOnChanges — D-M3.2 owns siteId's fate and replace semantics.
-// Asserted across the whole resource set.
-func TestReplaceOnChangesExcludesSiteId(t *testing.T) {
+// TestReplaceOnChangesMarksSiteId is the D-M3.2 guard: siteId is the per-resource
+// site-scope override (the framework honors a resource-level siteId over the
+// provider-global one), and the UniFi API has no move-to-another-site edit, so
+// changing it must recreate the resource. Pinned via mappings.yaml immutableFields,
+// so EVERY resource carrying a siteId input must have it replaceOnChanges.
+func TestReplaceOnChangesMarksSiteId(t *testing.T) {
 	pkg, _ := runPipelineTyped(t)
 
+	marked := 0
 	for tok, res := range pkg.Resources {
-		if ps, ok := res.InputProperties["siteId"]; ok && ps.ReplaceOnChanges {
-			t.Errorf("%s: siteId must NOT be replaceOnChanges here (owned by D-M3.2)", tok)
+		if _, ok := res.InputProperties["siteId"]; !ok {
+			continue
 		}
+		marked++
+		if !replaceOnChanges(pkg, tok, "siteId") {
+			t.Errorf("%s: siteId must be replaceOnChanges (immutableFields pin, D-M3.2)", tok)
+		}
+	}
+	if marked == 0 {
+		t.Error("no resource carried a siteId input — the pin would be dead")
 	}
 }
 
@@ -88,9 +98,10 @@ func TestReplaceOnChangesLeavesMutableInputsAlone(t *testing.T) {
 
 // TestReplaceOnChangesUnitMarksAllThreeSources is the focused unit proof, isolated
 // from the spec: a synthetic resource gets its readOnly input, its discriminator,
-// and its immutableFields pin (vlanId) marked, while a mutable input and siteId are
-// left untouched. The discriminator is identified by its Const (as D-M2.1 leaves
-// it) — this pass runs after token-rename, so it does not re-derive from the token.
+// and its immutableFields pins (vlanId + siteId, D-M3.2) marked, while an ordinary
+// mutable input is left untouched. The discriminator is identified by its Const (as
+// D-M2.1 leaves it) — this pass runs after token-rename, so it does not re-derive
+// from the token.
 func TestReplaceOnChangesUnitMarksAllThreeSources(t *testing.T) {
 	const coll = "/v1/sites/{siteId}/networks"
 	tok := "unifi:sites/v1:ManagedNetworkGateway" // post-rename name
@@ -135,16 +146,13 @@ func TestReplaceOnChangesUnitMarksAllThreeSources(t *testing.T) {
 	}
 
 	ip := pkg.Resources[tok].InputProperties
-	for _, want := range []string{"serverAssignedId", "management", "vlanId"} {
+	for _, want := range []string{"serverAssignedId", "management", "vlanId", "siteId"} {
 		if !ip[want].ReplaceOnChanges {
 			t.Errorf("%s must be replaceOnChanges (readOnly/discriminator/pin)", want)
 		}
 	}
 	if ip["name"].ReplaceOnChanges {
 		t.Error("name must stay mutable")
-	}
-	if ip["siteId"].ReplaceOnChanges {
-		t.Error("siteId must NOT be marked by this pass (D-M3.2 owns it)")
 	}
 }
 

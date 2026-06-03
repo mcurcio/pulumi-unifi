@@ -33,11 +33,9 @@ import (
 //     after token-rename, so the token no longer pascal-cases back to the value).
 //  3. an immutableFields pin from mappings.yaml that the resource actually has —
 //     spec-implicit immutability a rule cannot see (vlanId: changing a network's
-//     VLAN is a replace, not an edit).
-//
-// siteId is DELIBERATELY out of scope: D-M3.2 owns whether siteId is honored
-// per-resource or removed, and therefore its replace semantics. This pass never
-// adds siteId (none of the three sources yields it, and it is skipped defensively).
+//     VLAN is a replace, not an edit; siteId: a resource-level site-scope override
+//     the framework honors over the provider-global one, but the API has no
+//     move-to-another-site edit, so changing it recreates the resource — D-M3.2).
 //
 // Runs late — after naming/types are final — because it only annotates the shipped
 // resource set; it adds/renames nothing, so token/type passes need not see its
@@ -76,16 +74,14 @@ func replaceOnChangesPass(s *GenState) error {
 			}
 		}
 
-		// (3) immutableFields pins this resource actually carries.
+		// (3) immutableFields pins this resource actually carries (incl. siteId — its
+		// replace semantics are pinned via mappings.yaml, D-M3.2).
 		for _, name := range pins {
 			if _, has := res.InputProperties[name]; has {
 				immutable[name] = true
 				pinSeen[name] = true
 			}
 		}
-
-		// siteId's replace semantics belong to D-M3.2 — never mark it here.
-		delete(immutable, siteIDInput)
 
 		names := make([]string, 0, len(immutable))
 		for name := range immutable {
@@ -110,9 +106,6 @@ func replaceOnChangesPass(s *GenState) error {
 	// cannot silently carry a name the spec no longer has (mirrors the dead-exclusion
 	// guard on excludedPaths).
 	for _, name := range pins {
-		if name == siteIDInput {
-			return fmt.Errorf("replace-on-changes: immutableFields must not list %q — its replace semantics are owned by D-M3.2", siteIDInput)
-		}
 		if !pinSeen[name] {
 			return fmt.Errorf("replace-on-changes: immutableFields pin %q matched no resource input (dead pin — re-check on spec bump)", name)
 		}
@@ -120,8 +113,10 @@ func replaceOnChangesPass(s *GenState) error {
 	return nil
 }
 
-// siteIDInput is the SDK name of the site-scope input every resource carries; this
-// pass never marks it (D-M3.2 owns its semantics).
+// siteIDInput is the SDK name of the site-scope input every resource carries (the
+// {siteId} path parameter). It is a per-resource override of the provider-global
+// site (D-M3.2): pinned in mappings.yaml immutableFields (changing it recreates the
+// resource) and described via descriptions.inputs.siteId.
 const siteIDInput = "siteId"
 
 // readOnlyInputs returns the SDK names of the resource's create-body properties the

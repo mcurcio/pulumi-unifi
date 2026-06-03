@@ -25,6 +25,12 @@ import (
 //     whose CRUD-looking shape needs an honest caveat (Voucher / AdoptDevice,
 //     D-M3.3).
 //
+// It also annotates the per-resource siteId input (D-M3.2): a property synthesized
+// from the {siteId} path parameter, so it carries no spec description of its own.
+// The text comes from mappings.yaml `descriptions.inputs.siteId` and documents
+// that a resource-level siteId overrides the provider-global site (and is a
+// replacement — siteId is also marked replaceOnChanges, pass_replace_on_changes).
+//
 // Runs late in the pipeline — after the token-rename and de-page passes — so the
 // override keys match the final, consumer-facing token names and every token is
 // annotated exactly once on the shipped set.
@@ -35,6 +41,8 @@ import (
 func descriptionsPass(s *GenState) error {
 	crudMap := s.Meta.ResourceCRUDMap
 	doc := s.Doc
+
+	siteIDDesc, haveSiteIDDesc := inputDescription(siteIDInput)
 
 	for _, tok := range sortedKeys(s.Pkg.Resources) {
 		short := tokenShortName(tok)
@@ -52,6 +60,15 @@ func descriptionsPass(s *GenState) error {
 		}
 		r := s.Pkg.Resources[tok]
 		r.Description = desc
+		// Annotate the per-resource siteId input, if this resource carries one and
+		// a description is pinned (D-M3.2). Done in-place on the resolved spec so
+		// the per-property description ships in schema.json/the SDK.
+		if haveSiteIDDesc {
+			if ps, ok := r.InputProperties[siteIDInput]; ok {
+				ps.Description = siteIDDesc
+				r.InputProperties[siteIDInput] = ps
+			}
+		}
 		s.Pkg.Resources[tok] = r
 	}
 

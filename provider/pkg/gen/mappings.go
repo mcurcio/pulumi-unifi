@@ -47,6 +47,9 @@ type functionMappings struct {
 // synthesizes a default for every token; these pin the cases where that default
 // is too weak), keyed by final token short name.
 type descriptionMappings struct {
+	// Inputs pins descriptions for well-known input properties shared across many
+	// resources (e.g. siteId), keyed by SDK property name.
+	Inputs    map[string]string `yaml:"inputs"`
 	Resources map[string]string `yaml:"resources"`
 	Functions map[string]string `yaml:"functions"`
 }
@@ -148,6 +151,14 @@ func resourceDescriptionOverride(short string) (string, bool) {
 // short name, and whether one exists.
 func functionDescriptionOverride(short string) (string, bool) {
 	v, ok := loadMappings().Descriptions.Functions[short]
+	return v, ok
+}
+
+// inputDescription returns the pinned description for a well-known input property
+// (keyed by SDK property name), and whether one exists. Used for properties
+// synthesized from a path parameter (e.g. siteId) that carry no spec description.
+func inputDescription(prop string) (string, bool) {
+	v, ok := loadMappings().Descriptions.Inputs[prop]
 	return v, ok
 }
 

@@ -129,3 +129,93 @@ func TestWirePath(t *testing.T) {
 		}
 	})
 }
+
+// TestWirePathResourceSiteIDOverride is the D-M3.2 regression guard for the
+// per-resource siteId override. It is the in-process counterpart of TestWirePath:
+// an httptest TLS server, no Docker, so it runs in the default `make test` gate.
+//
+// It proves the framework's getPathParamsMap resolves {siteId} from the RESOURCE's
+// own inputs first, falling back to the provider-global value only when absent (the
+// code comment: "we look for this after checking the resource state, so it can be
+// overridden at a resource level"). The provider is configured with the global
+// siteId="default", but a FirewallZone is Created with a resource-level
+// siteId="site-b" — the POST must land on /sites/site-b/, NOT /sites/default/. This
+// is the guard that the override stays honored across framework bumps.
+func TestWirePathResourceSiteIDOverride(t *testing.T) {
+	const apiKey = "wire-secret-key"
+	const globalSite = "default"
+	const resourceSite = "site-b"
+
+	var mu sync.Mutex
+	var gotPath string
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotPath = r.URL.Path
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		// A minimal create response: the framework extracts `id` from the body to
+		// build the CreateResponse. The values are irrelevant — this test asserts on
+		// the request path, not the parsed result.
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"zone-1","name":"wire-zone"}`))
+	}))
+	defer srv.Close()
+
+	apiHost := strings.TrimPrefix(srv.URL, "https://")
+
+	rp, err := makeProvider(
+		nil, "unifi", "0.0.0-test",
+		readArtifact(t, "schema.json"),
+		readArtifact(t, "openapi_generated.yml"),
+		readArtifact(t, "metadata.json"),
+	)
+	if err != nil {
+		t.Fatalf("makeProvider: %v", err)
+	}
+
+	ctx := context.Background()
+	if _, err := rp.Configure(ctx, &pulumirpc.ConfigureRequest{
+		Variables: map[string]string{
+			"unifi:config:apiKey":        apiKey,
+			"unifi:config:apiHost":       apiHost,
+			"unifi:config:siteId":        globalSite, // provider-global site
+			"unifi:config:allowInsecure": "true",
+		},
+	}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	// FirewallZone's create path is /v1/sites/{siteId}/firewall/zones. The resource
+	// carries a siteId input (D-M3.2); setting it to site-b must win over the global
+	// "default". The framework validates the request body against the spec before
+	// sending, so the body must be schema-valid: name + networkIds (a uuid array).
+	const tok = "unifi:sites/v1:FirewallZone"
+	const urn = "urn:pulumi:test::test::" + tok + "::wire-zone"
+	const exampleNetworkID = "dfb21062-8ea0-4dca-b1d8-1eb3da00e58b" // spec's example network uuid
+	props, err := plugin.MarshalProperties(resource.PropertyMap{
+		"name": resource.NewStringProperty("wire-zone"),
+		"networkIds": resource.NewArrayProperty([]resource.PropertyValue{
+			resource.NewStringProperty(exampleNetworkID),
+		}),
+		"siteId": resource.NewStringProperty(resourceSite),
+	}, plugin.MarshalOptions{})
+	if err != nil {
+		t.Fatalf("marshal props: %v", err)
+	}
+
+	if _, err := rp.Create(ctx, &pulumirpc.CreateRequest{Urn: urn, Properties: props}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	wantSuffix := "/v1/sites/" + resourceSite + "/firewall/zones"
+	if !strings.HasSuffix(gotPath, wantSuffix) {
+		t.Errorf("request path = %q, want suffix %q (resource-level siteId=%q must override global %q)", gotPath, wantSuffix, resourceSite, globalSite)
+	}
+	if strings.Contains(gotPath, "/sites/"+globalSite+"/") {
+		t.Errorf("request path = %q used the provider-global site %q; the resource-level siteId override was NOT honored", gotPath, globalSite)
+	}
+}
