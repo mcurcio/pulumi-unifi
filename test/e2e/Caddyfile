@@ -1,0 +1,30 @@
+# TLS terminator + edge-proxy stand-in in front of the plain Network app.
+#
+# The provider speaks https://<host>/proxy/network/integration/v1/... (the
+# /proxy/network prefix is what UniFi OS prepends externally; the generated
+# server URL bakes it in). The PLAIN linuxserver/unifi-network-application image
+# has no edge proxy and serves the Integration API at /integration/v1/...
+# directly on its own TLS port 8443. So Caddy stands in for UniFi OS's edge:
+# it terminates TLS with our local cert and `handle_path /proxy/network/*`
+# STRIPS the /proxy/network prefix, leaving /integration/v1/... which it
+# reverse-proxies (over https, skipping the app's self-signed-cert verification)
+# to the app on https://unifi:8443.
+#
+#   provider -> https://127.0.0.1:11443/proxy/network/integration/v1/sites
+#            -> Caddy strips /proxy/network
+#            -> https://unifi:8443/integration/v1/sites
+{
+	auto_https off
+	admin off
+}
+
+:443 {
+	tls /certs/server.crt /certs/server.key
+	handle_path /proxy/network/* {
+		reverse_proxy https://unifi:8443 {
+			transport http {
+				tls_insecure_skip_verify
+			}
+		}
+	}
+}

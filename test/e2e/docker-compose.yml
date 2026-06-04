@@ -1,39 +1,77 @@
-# Tier-2 e2e: a real UniFi controller exposing the official Integration API at
-# :11443/proxy/network/integration/v1. Only UniFi OS Server serves this surface
-# and can mint X-API-Keys — the plain linuxserver/unifi-network-application image
-# CANNOT, so it is not usable here.
+# Tier-2 e2e: a real UniFi Network controller serving the official Integration
+# API, assembled from three PLAIN, privilege-free containers — no systemd, no
+# capabilities, no privileged, no cgroup host namespace, nothing that needs an
+# elevated/self-hosted runner. This runs on stock GitHub-hosted runners.
 #
-# This container is heavy (systemd, multi-GB RAM) and has NO headless first-run
-# setup or documented key-minting API. Provisioning (see README.md) is the hard,
-# operationally-fragile part: first-run wizard + API-key creation must be scripted
-# (Playwright UI automation) or restored from a pre-baked volume snapshot.
+# Why this works (the lean pivot): the heavy "UniFi OS Server" image was needed
+# only because we assumed the Integration API lived behind UniFi OS's edge proxy.
+# It does not — the plain linuxserver/unifi-network-application container serves
+# the Integration API directly at /integration/v1/... (UniFi OS merely PREPENDS
+# the external /proxy/network prefix). A GET /integration/v1/sites on the bare
+# container returns 403 (auth-gated, needs an X-API-Key), proving the surface is
+# present. So we put a Caddy front in front that strips /proxy/network — exactly
+# like the Tier-1 mock — and the provider's
+# /proxy/network/integration/v1/... requests land on the app's /integration/v1.
 #
-# Pin a controller version aligned to the vendored spec (10.4.x) so resource
-# shapes match. Adjust the image ref once a 10.4.x UniFi OS Server image/source is
-# selected — left as a TODO rather than guessed.
+# Three services:
+#   mongo  — the controller's datastore (the app image needs an external Mongo).
+#   unifi  — linuxserver/unifi-network-application (the Network app itself).
+#   tls    — Caddy: terminates TLS on :443 and rewrites /proxy/network/* to the
+#            app's https://unifi:8443/... (the prefix the provider speaks).
+#
+# Two flows drive this file (see README.md):
+#   - make e2e-bootstrap : ONE-TIME — boot the stack, complete the wizard + mint
+#     a key by hand (https://localhost:8443), then snapshot the SEED compactly
+#     (mongodump --archive --gzip + a tar of /config) into unifi-seed.tgz.
+#   - make test-e2e      : REPEATABLE — restore the seed into fresh mongo+config
+#     volumes, boot, and run the live Go tests through Caddy on :11443.
 
 services:
-  unifi:
-    # TODO: pin a UniFi OS Server image at controller version 10.4.x. The exact
-    # distributable is an operational decision (licensed image vs. self-built);
-    # do not assume a public tag without verifying it serves the Integration API.
-    image: unifi-os-server:10.4.x # placeholder — must be set before use
-    privileged: true
-    tmpfs:
-      - /run
-      - /run/lock
-    ports:
-      - "11443:11443" # Integration API (https)
-      - "8443:8443" #   classic Network app UI (provisioning)
+  mongo:
+    image: mongo:7.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpass
     volumes:
-      - unifi-data:/data
-    healthcheck:
-      # Ready when the Integration API root answers TLS (401 without a key is OK).
-      test: ["CMD", "sh", "-c", "curl -ksf -o /dev/null -w '%{http_code}' https://localhost:11443/proxy/network/integration/v1/sites | grep -qE '200|401|403'"]
-      interval: 30s
-      timeout: 10s
-      retries: 40 # startup is minutes, not seconds
-      start_period: 120s
+      # init-mongo.js runs once on a FRESH data volume: it creates the `unifi`
+      # application user (dbOwner on the app DBs) the Network app authenticates
+      # as. It is a no-op on an already-initialized volume (e.g. after restore.sh
+      # has loaded a dump), which is exactly what we want.
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+      - mongo_data:/data/db
+
+  unifi:
+    image: lscr.io/linuxserver/unifi-network-application:10.3.58
+    depends_on:
+      - mongo
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      MONGO_HOST: mongo
+      MONGO_PORT: "27017"
+      MONGO_DBNAME: unifi
+      MONGO_USER: unifi
+      MONGO_PASS: unifipass
+      MONGO_AUTHSOURCE: admin
+    volumes:
+      - unifi_config:/config
+    ports:
+      # Direct app GUI/API over TLS — the bootstrap wizard is reached here.
+      - "8443:8443"
+
+  tls:
+    image: caddy:2
+    depends_on:
+      - unifi
+    ports:
+      # The provider + tests hit Caddy here; it strips /proxy/network and proxies
+      # to the app's /integration/... on https://unifi:8443.
+      - "11443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
 
 volumes:
-  unifi-data:
+  mongo_data:
+  unifi_config:
