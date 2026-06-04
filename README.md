@@ -87,8 +87,12 @@ provider/          # Go module: plugin binary, codegen entrypoint, pkg/{gen,prov
 sdk/python/        # generated Python SDK (pulumi_unifi) — build artifact, gitignored
 test/
   mock/            # Tier-1: Prism mock + TLS front (make test-mock)
-  e2e/             # Tier-2: UniFi OS Server controller scaffold
+  e2e/             # Tier-2: UniFi OS Server, seed-restore harness (make e2e-bootstrap / test-e2e)
 ```
+
+The Tier-2 e2e seed (`test/e2e/unifi-seed.tgz`) is a **git-lfs** object; run
+`git lfs install && git lfs pull` once per clone before `make test-e2e`. See
+[test/e2e/README.md](test/e2e/README.md) for the full runbook.
 
 ## Getting started (for the build session)
 

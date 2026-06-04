@@ -30,7 +30,7 @@ E2E_COMPOSE  := test/e2e/docker-compose.yml
 # bootstrap.sh, restore.sh, and the test-e2e target all agree on them.
 E2E_PROJECT      := pulumi-unifi-e2e
 E2E_MONGO_VOLUME := $(E2E_PROJECT)_mongo_data
-E2E_CONFIG_VOLUME:= $(E2E_PROJECT)_unifi_config
+E2E_DATA_VOLUME  := $(E2E_PROJECT)_unifi_data
 E2E_SEED         := test/e2e/unifi-seed.tgz
 E2E_ENV          := test/e2e/seed.env
 
@@ -133,8 +133,9 @@ test-e2e:: build
 	@test -f $(E2E_ENV)  || { echo "ERROR: $(E2E_ENV) missing — run 'make e2e-bootstrap' first"; exit 1; }
 	./test/e2e/gen-certs.sh
 	set -e; \
-	trap 'docker compose -p $(E2E_PROJECT) -f $(E2E_COMPOSE) down -v; docker volume rm $(E2E_MONGO_VOLUME) $(E2E_CONFIG_VOLUME) >/dev/null 2>&1 || true' EXIT; \
-	./test/e2e/restore.sh $(E2E_SEED) $(E2E_MONGO_VOLUME) $(E2E_CONFIG_VOLUME); \
+	trap 'docker compose -p $(E2E_PROJECT) -f $(E2E_COMPOSE) down -v; docker volume rm $(E2E_MONGO_VOLUME) $(E2E_DATA_VOLUME) >/dev/null 2>&1 || true' EXIT; \
+	./test/e2e/restore.sh $(E2E_SEED) $(E2E_MONGO_VOLUME) $(E2E_DATA_VOLUME); \
+	docker compose -p $(E2E_PROJECT) -f $(E2E_COMPOSE) build; \
 	docker compose -p $(E2E_PROJECT) -f $(E2E_COMPOSE) up -d --wait; \
 	echo "waiting for the controller to serve the Integration API (app boot is ~2-4 min)..."; \
 	ready=; \

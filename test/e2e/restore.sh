@@ -4,23 +4,23 @@
 # Used by the repeatable `make test-e2e` path and by bootstrap.sh's seed
 # self-validation. The seed (unifi-seed.tgz) contains two members:
 #   mongo.archive.gz  — `mongodump --archive --gzip` of the app's databases
-#   config.tgz        — a tar of the app's /config volume
+#   data.tgz          — a tar of the controller data dir (/usr/lib/unifi/data)
 # This script recreates BOTH target volumes from scratch (so stale prior state
 # can't leak), then:
 #   - boots a THROWAWAY mongod bound to the fresh mongo volume, re-creates the
 #     `unifi` app user (the admin-db user is not in the DB dump), `mongorestore`s
 #     the archive, and shuts the throwaway mongod down;
-#   - untars config.tgz into the fresh config volume (perms preserved).
+#   - untars data.tgz into the fresh data volume (perms preserved).
 # After this, `docker compose up` boots the app against pre-seeded volumes.
 #
-# Usage: restore.sh <seed.tgz> <mongo-volume> <config-volume>
+# Usage: restore.sh <seed.tgz> <mongo-volume> <data-volume>
 #   e.g. restore.sh test/e2e/unifi-seed.tgz \
-#          pulumi-unifi-e2e_mongo_data pulumi-unifi-e2e_unifi_config
+#          pulumi-unifi-e2e_mongo_data pulumi-unifi-e2e_unifi_data
 set -euo pipefail
 
-SEED="${1:?usage: restore.sh <seed.tgz> <mongo-volume> <config-volume>}"
-MONGO_VOL="${2:?usage: restore.sh <seed.tgz> <mongo-volume> <config-volume>}"
-CONFIG_VOL="${3:?usage: restore.sh <seed.tgz> <mongo-volume> <config-volume>}"
+SEED="${1:?usage: restore.sh <seed.tgz> <mongo-volume> <data-volume>}"
+MONGO_VOL="${2:?usage: restore.sh <seed.tgz> <mongo-volume> <data-volume>}"
+DATA_VOL="${3:?usage: restore.sh <seed.tgz> <mongo-volume> <data-volume>}"
 
 # Mongo creds — must match docker-compose.yml + init-mongo.js.
 MONGO_ROOT_USER="root"
@@ -53,10 +53,10 @@ trap cleanup EXIT
 echo "==> extracting seed members"
 tar -xzf "$SEED" -C "$WORK"
 [ -f "$WORK/mongo.archive.gz" ] || { echo "ERROR: seed missing mongo.archive.gz" >&2; exit 1; }
-[ -f "$WORK/config.tgz" ]       || { echo "ERROR: seed missing config.tgz" >&2; exit 1; }
+[ -f "$WORK/data.tgz" ]         || { echo "ERROR: seed missing data.tgz" >&2; exit 1; }
 
 # --- recreate target volumes from scratch -----------------------------------
-for v in "$MONGO_VOL" "$CONFIG_VOL"; do
+for v in "$MONGO_VOL" "$DATA_VOL"; do
   echo "==> recreating volume $v from scratch"
   docker volume rm "$v" >/dev/null 2>&1 || true
   docker volume create "$v" >/dev/null
@@ -100,12 +100,12 @@ echo "==> shutting the throwaway mongod down (volume now seeded)"
 mongo_down
 trap cleanup EXIT
 
-# --- restore /config --------------------------------------------------------
-echo "==> untarring config into $CONFIG_VOL (perms preserved)"
+# --- restore the controller data dir ----------------------------------------
+echo "==> untarring data dir into $DATA_VOL (perms preserved)"
 docker run --rm \
   -v "$WORK":/seed:ro \
-  -v "$CONFIG_VOL":/config \
+  -v "$DATA_VOL":/data \
   alpine:3 \
-  sh -c "tar -xpzf /seed/config.tgz -C /config"
+  sh -c "tar -xpzf /seed/data.tgz -C /data"
 
 echo "==> restore complete"

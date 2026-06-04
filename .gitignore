@@ -46,10 +46,20 @@ venv/
 # openapi/pin.env is the committed pin manifest (spec version/SHA/checksum — the
 # single source of truth), NOT a secret. Force-track it past the *.env rule.
 !openapi/pin.env
+# test/e2e/seed.env is the THROWAWAY e2e controller's baked key + bundled Network
+# version — committed on purpose (disposable test controller), so force-track it
+# past the *.env rule too. The seed snapshot itself (test/e2e/unifi-seed.tgz) is
+# committed via git-lfs (see .gitattributes); neither is gitignored.
+!test/e2e/seed.env
 
-# --- Test harness (generated TLS material) ---
+# --- Test harness (generated TLS material + e2e scratch) ---
 test/mock/certs/
 test/e2e/certs/
+# Throwaway restore/extract dirs the e2e scripts may stage locally (the real
+# restore goes into a Docker volume, but guard against any local scratch).
+test/e2e/restore/
+test/e2e/.scratch/
+test/e2e/*.tmp
 
 # --- Editor / OS ---
 .DS_Store

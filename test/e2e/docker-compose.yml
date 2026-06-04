@@ -15,7 +15,10 @@
 #
 # Three services:
 #   mongo  — the controller's datastore (the app image needs an external Mongo).
-#   unifi  — linuxserver/unifi-network-application (the Network app itself).
+#   unifi  — a THIN, version-LOCKED controller built from ./controller (the
+#            pinned 10.4.57 .deb on a Temurin-25 JRE — see controller/README.md),
+#            replacing linuxserver/unifi-network-application so the live tier runs
+#            on the EXACT spec version. Same external-mongo env contract.
 #   tls    — Caddy: terminates TLS on :443 and rewrites /proxy/network/* to the
 #            app's https://unifi:8443/... (the prefix the provider speaks).
 #
@@ -41,12 +44,16 @@ services:
       - mongo_data:/data/db
 
   unifi:
-    image: lscr.io/linuxserver/unifi-network-application:10.3.58
+    # Thin pinned-10.4.57 image (Dockerfile in ./controller). Compose builds it
+    # on `up`; `make test-e2e` / `e2e-bootstrap` run an explicit `compose build`
+    # first so `--wait` doesn't race the build.
+    build:
+      context: ./controller
     depends_on:
       - mongo
     environment:
-      PUID: "1000"
-      PGID: "1000"
+      # PUID/PGID are a linuxserver-ism; the custom image runs as root (throwaway
+      # test controller) and ignores them. Kept out for clarity.
       TZ: Etc/UTC
       MONGO_HOST: mongo
       MONGO_PORT: "27017"
@@ -55,7 +62,10 @@ services:
       MONGO_PASS: unifipass
       MONGO_AUTHSOURCE: admin
     volumes:
-      - unifi_config:/config
+      # The custom image's data dir is /usr/lib/unifi/data (the .deb's layout),
+      # NOT linuxserver's /config. The seed's keystore + system.properties live
+      # here; restore.sh / bootstrap.sh tar this path.
+      - unifi_data:/usr/lib/unifi/data
     ports:
       # Direct app GUI/API over TLS — the bootstrap wizard is reached here.
       - "8443:8443"
@@ -74,4 +84,4 @@ services:
 
 volumes:
   mongo_data:
-  unifi_config:
+  unifi_data:
