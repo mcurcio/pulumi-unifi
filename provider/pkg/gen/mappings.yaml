@@ -31,6 +31,22 @@ excludedPaths:
   - /v1/sites/{siteId}/devices/{deviceId}/statistics/latest
   - /v1/sites/{siteId}/networks/{networkId}/references
 
+# excludeResources drops specific RESOURCE tokens (not paths) from the managed
+# resource set, while preserving any data sources derived from the same endpoints.
+# It exists because excludedPaths is too blunt for these cases (D-M3.3): the
+# create/read endpoints these tokens bind to ALSO serve useful read-only data
+# sources, so excluding the path would destroy those reads. Voucher (a batch-
+# generate RPC: POST returns a batch of generated codes) and AdoptDevice (an
+# imperative adopt action; destroy = un-adopt) are non-CRUD *actions*, not
+# declarative resources — consistent with the project policy of excluding non-CRUD
+# endpoints. Their GET-derived data sources (getVoucher, getAdoptedDeviceDetail,
+# listAdoptedDeviceOverviews) survive because we exclude at the resource level.
+# A dead entry (a token no live resource carries) is a loud error — see
+# pass_exclude_resources_test.go — so it cannot silently rot across a spec bump.
+excludeResources:
+  - unifi:sites/v1:Voucher
+  - unifi:sites/v1:AdoptDevice
+
 # resources holds the per-entity resource-naming editorial layer.
 #
 # entityPrefixes maps a discriminated entity's collection (create) path to the
@@ -88,10 +104,9 @@ functions:
 #
 # The discriminated-variant resources all share one collection summary ("Create
 # DNS Policy", "Create Network", …) that cannot distinguish A_RECORD from
-# AAAA_RECORD, so each variant gets a precise description here. Voucher and
-# AdoptDevice are batch/action RPCs masquerading as CRUD (D-M3.3) — their
-# descriptions state that honestly so the non-declarative semantics are documented
-# rather than hidden.
+# AAAA_RECORD, so each variant gets a precise description here. (The Voucher and
+# AdoptDevice batch/action RPCs are excluded from the resource set entirely via
+# excludeResources, D-M3.3, so they need no description pins here.)
 descriptions:
   # inputs pins the description of a well-known input property shared across many
   # resources, where the property is synthesized from a path parameter and so
@@ -124,9 +139,6 @@ descriptions:
     TrafficMatchIpv4Addresses: An IPv4-addresses traffic-matching list on UniFi.
     TrafficMatchIpv6Addresses: An IPv6-addresses traffic-matching list on UniFi.
     TrafficMatchPorts: A ports traffic-matching list on UniFi.
-    # Batch/action RPCs modeled as resources (D-M3.3) — documented honestly.
-    Voucher: "Generates a batch of UniFi hotspot guest vouchers. NOTE: this is a batch-generate action, not a declarative resource: `count` controls how many vouchers are created at once and the generated codes are returned as outputs; updating `count` does not reconcile an existing batch and `pulumi destroy` revokes the generated vouchers. Treat each apply as a one-shot generation."
-    AdoptDevice: "Adopts UniFi device(s) into the site. NOTE: this is an imperative action, not a declarative resource: it triggers device adoption by MAC address; there is no in-place update, and `pulumi destroy` unadopts (removes) the device. Models the official API's POST /devices adopt action."
 
 # enums pins the canonical NAME for a merged enum family (pass_enum.go, D-M2.7).
 # pulschema emits one enum type per operation/variant the spec duplicates, so the

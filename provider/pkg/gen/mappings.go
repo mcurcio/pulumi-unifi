@@ -64,12 +64,13 @@ type enumMappings struct {
 
 // mappingsFile is the parsed shape of mappings.yaml: the whole editorial layer.
 type mappingsFile struct {
-	ExcludedPaths   []string            `yaml:"excludedPaths"`
-	Resources       resourceMappings    `yaml:"resources"`
-	Functions       functionMappings    `yaml:"functions"`
-	Descriptions    descriptionMappings `yaml:"descriptions"`
-	Enums           enumMappings        `yaml:"enums"`
-	ImmutableFields []string            `yaml:"immutableFields"`
+	ExcludedPaths    []string            `yaml:"excludedPaths"`
+	ExcludeResources []string            `yaml:"excludeResources"`
+	Resources        resourceMappings    `yaml:"resources"`
+	Functions        functionMappings    `yaml:"functions"`
+	Descriptions     descriptionMappings `yaml:"descriptions"`
+	Enums            enumMappings        `yaml:"enums"`
+	ImmutableFields  []string            `yaml:"immutableFields"`
 }
 
 var (
@@ -111,6 +112,14 @@ func (m *mappingsFile) validate() error {
 // Go-literal excludedPaths). Callers must not mutate the returned slice.
 func mappingExcludedPaths() []string {
 	return loadMappings().ExcludedPaths
+}
+
+// mappingExcludeResources returns the editorial resource-token exclusion list
+// (D-M3.3): action/batch RPC tokens dropped from the managed resource set while
+// their GET-derived data sources are preserved (path-level exclusion cannot do
+// this — see pass_exclude_resources.go). Callers must not mutate the returned slice.
+func mappingExcludeResources() []string {
+	return loadMappings().ExcludeResources
 }
 
 // entityPrefix returns the resource-token prefix pinned for a discriminated

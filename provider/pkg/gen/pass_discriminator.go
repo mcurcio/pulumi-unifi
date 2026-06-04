@@ -38,9 +38,10 @@ import (
 //
 // The derivation is entirely spec-driven: nothing is hardcoded. A resource whose
 // POST body carries no discriminator (the flat resources — FirewallZone,
-// FirewallPolicy, Voucher, AdoptDevice) is skipped untouched. If a variant token
-// cannot be matched back to a mapping value, that is a spec/derivation drift and
-// the pass errors loudly rather than silently leaving a required magic string.
+// FirewallPolicy, and the Voucher/AdoptDevice action RPCs that exclude-resources
+// later drops, D-M3.3) is skipped untouched. If a variant token cannot be matched
+// back to a mapping value, that is a spec/derivation drift and the pass errors
+// loudly rather than silently leaving a required magic string.
 //
 // Deterministic: each resource's edit depends only on its own crudMap C path and
 // the spec's discriminator mapping, independent of map iteration order. Keys are

@@ -21,9 +21,9 @@ import (
 //   - Override: mappings.yaml `descriptions.{resources,functions}` keyed by the
 //     final token short name, for the cases where the shared collection summary
 //     cannot distinguish a discriminated variant ("Create DNS Policy" describes
-//     all 7 DNS variants identically) or where the resource is a batch/action RPC
-//     whose CRUD-looking shape needs an honest caveat (Voucher / AdoptDevice,
-//     D-M3.3).
+//     all 7 DNS variants identically). (The Voucher/AdoptDevice action/batch RPCs
+//     are excluded from the resource set upstream by exclude-resources, D-M3.3, so
+//     this pass never sees them.)
 //
 // It also annotates the per-resource siteId input (D-M3.2): a property synthesized
 // from the {siteId} path parameter, so it carries no spec description of its own.

@@ -102,6 +102,13 @@ var passes = []pass{
 	// Naming polish: entity-prefix the context-free variant tokens and normalize
 	// function names. Runs after the discriminator value is recovered.
 	{name: "token-rename", fn: tokenRenamePass},
+	// Drop the action/batch RPC resources (Voucher/AdoptDevice) listed in
+	// mappings.yaml's excludeResources, in lockstep with their crudMap/autoNameMap
+	// entries — while preserving the data sources their shared endpoints serve
+	// (D-M3.3). Runs after token-rename so it matches the final token names, and
+	// before the annotation passes (descriptions / replace-on-changes) so they
+	// never process the doomed resources.
+	{name: "exclude-resources", fn: excludeResourcesPass},
 	// De-page the auto-aggregated list data sources: rename get<Entity>Page →
 	// list<Entities> and drop the now-meaningless limit/offset paging knobs. Runs
 	// after token-rename (which deliberately leaves *Page tokens alone) so the

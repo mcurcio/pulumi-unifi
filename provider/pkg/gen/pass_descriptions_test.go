@@ -38,9 +38,12 @@ func TestDescriptionsBackfilledOnPipeline(t *testing.T) {
 	if got := pkg.Resources["unifi:sites/v1:DnsARecord"].Description; !strings.Contains(got, "IPv4") {
 		t.Errorf("DnsARecord description = %q; want the precise IPv4 override, not the shared 'Create DNS Policy' summary", got)
 	}
-	// Batch/action RPCs (D-M3.3) document their non-declarative semantics.
-	if got := pkg.Resources["unifi:sites/v1:Voucher"].Description; !strings.Contains(got, "batch") {
-		t.Errorf("Voucher description = %q; want the honest batch-action caveat", got)
+	// The Voucher/AdoptDevice action/batch RPCs are excluded from the resource set
+	// entirely (D-M3.3, excludeResources), so they must NOT appear here at all.
+	for _, tok := range []string{"unifi:sites/v1:Voucher", "unifi:sites/v1:AdoptDevice"} {
+		if _, ok := pkg.Resources[tok]; ok {
+			t.Errorf("excluded action/batch RPC %q is still a resource", tok)
+		}
 	}
 }
 

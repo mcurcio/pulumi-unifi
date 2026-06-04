@@ -37,11 +37,11 @@ func TestDiscriminatorInjectedOnRealPipeline(t *testing.T) {
 		"unifi:sites/v1:TrafficMatchIpv6Addresses": "type",
 		"unifi:sites/v1:TrafficMatchPorts":         "type",
 	}
+	// The only flat (non-discriminated) resources that ship: the Voucher/AdoptDevice
+	// action/batch RPCs are excluded from the resource set entirely (D-M3.3).
 	flat := map[string]bool{
 		"unifi:sites/v1:FirewallZone":   true,
 		"unifi:sites/v1:FirewallPolicy": true,
-		"unifi:sites/v1:Voucher":        true,
-		"unifi:sites/v1:AdoptDevice":    true,
 	}
 
 	for tok, prop := range discProp {
