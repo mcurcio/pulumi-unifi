@@ -39,18 +39,18 @@ def test_import_top_level():
 # discriminated variant (Standard / IotOptimized — WiFi broadcast) and the flat
 # FirewallZone, so both the per-variant split and ordinary resources are pinned.
 EXPECTED_SITE_RESOURCES = [
-    "Standard",
-    "IotOptimized",
-    "Gateway",
+    "WifiBroadcastStandard",
+    "WifiBroadcastIotOptimized",
+    "ManagedNetworkGateway",
     "FirewallZone",
     "FirewallPolicy",
-    "ARecord",
+    "DnsARecord",
 ]
 
 # Data-source (function) symbols that must exist on pulumi_unifi.sites.v1.
 EXPECTED_SITE_FUNCTIONS = [
     "get_firewall_zone",
-    "get_wifi_broadcast_page",
+    "list_wifi_broadcasts",
 ]
 
 
@@ -71,10 +71,10 @@ def test_discriminated_variant_is_a_resource():
     import pulumi
 
     sites = importlib.import_module("pulumi_unifi.sites.v1")
-    assert issubclass(sites.Standard, pulumi.CustomResource)
+    assert issubclass(sites.WifiBroadcastStandard, pulumi.CustomResource)
 
 
 def test_top_level_country_data_source():
     """A no-siteId data source (countries) is also reachable."""
     countries = importlib.import_module("pulumi_unifi.countries.v1")
-    assert hasattr(countries, "get_countrie")
+    assert hasattr(countries, "get_country")

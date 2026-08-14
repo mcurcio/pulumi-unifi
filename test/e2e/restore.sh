@@ -1,32 +1,24 @@
 #!/usr/bin/env bash
-# restore.sh — repopulate fresh Docker volumes from a lean UniFi seed tarball.
+# restore.sh — repopulate a fresh Docker volume from the UniFi OS seed snapshot.
 #
-# Used by the repeatable `make test-e2e` path and by bootstrap.sh's seed
-# self-validation. The seed (unifi-seed.tgz) contains two members:
-#   mongo.archive.gz  — `mongodump --archive --gzip` of the app's databases
-#   data.tgz          — a tar of the controller data dir (/usr/lib/unifi/data)
-# This script recreates BOTH target volumes from scratch (so stale prior state
-# can't leak), then:
-#   - boots a THROWAWAY mongod bound to the fresh mongo volume, re-creates the
-#     `unifi` app user (the admin-db user is not in the DB dump), `mongorestore`s
-#     the archive, and shuts the throwaway mongod down;
-#   - untars data.tgz into the fresh data volume (perms preserved).
-# After this, `docker compose up` boots the app against pre-seeded volumes.
+# The seed (unifi-seed.tgz) is a plain gzipped tar of the heavy controller's whole
+# persistent state volume (/unifi). Because /data is a symlink to /unifi/data, that
+# ONE volume holds everything: Mongo (/unifi/db), Postgres (/unifi/data/postgresql
+# — which stores the api_key secret), unifi-core config, and the Network app data.
+# So restoring is just: recreate the volume and untar the snapshot into it. After
+# this, `docker compose up` boots UniFi OS against pre-seeded state and the minted
+# key validates immediately — no wizard, no re-mint.
 #
-# Usage: restore.sh <seed.tgz> <mongo-volume> <data-volume>
-#   e.g. restore.sh test/e2e/unifi-seed.tgz \
-#          pulumi-unifi-e2e_mongo_data pulumi-unifi-e2e_unifi_data
+# The snapshot was taken from a GRACEFULLY stopped container (DBs flushed), so the
+# data files are consistent; we still defensively clear a stale Postgres
+# postmaster.pid in case a future bake stops less cleanly.
+#
+# Usage: restore.sh <seed.tgz> <volume>
+#   e.g. restore.sh test/e2e/unifi-seed.tgz pulumi-unifi-e2e_uos_data
 set -euo pipefail
 
-SEED="${1:?usage: restore.sh <seed.tgz> <mongo-volume> <data-volume>}"
-MONGO_VOL="${2:?usage: restore.sh <seed.tgz> <mongo-volume> <data-volume>}"
-DATA_VOL="${3:?usage: restore.sh <seed.tgz> <mongo-volume> <data-volume>}"
-
-# Mongo creds — must match docker-compose.yml + init-mongo.js.
-MONGO_ROOT_USER="root"
-MONGO_ROOT_PASS="rootpass"
-MONGO_APP_USER="unifi"
-MONGO_APP_PASS="unifipass"
+SEED="${1:?usage: restore.sh <seed.tgz> <volume>}"
+VOL="${2:?usage: restore.sh <seed.tgz> <volume>}"
 
 if [ ! -f "$SEED" ]; then
   echo "ERROR: seed tarball not found: $SEED" >&2
@@ -34,78 +26,26 @@ if [ ! -f "$SEED" ]; then
   exit 1
 fi
 
-# A tiny file means a git-lfs pointer was checked out but the object never
-# fetched. Catch that early with a friendly message.
+# A tiny file means a git-lfs pointer was checked out but the object never fetched.
 SIZE=$(wc -c < "$SEED")
-if [ "$SIZE" -lt 1024 ]; then
+if [ "$SIZE" -lt 1048576 ]; then
   echo "ERROR: $SEED is only ${SIZE} bytes — looks like an un-fetched git-lfs pointer." >&2
   echo "       Run: git lfs install && git lfs pull" >&2
   exit 1
 fi
 
-SEED_DIR=$(cd "$(dirname "$SEED")" && pwd)
-SEED_FILE=$(basename "$SEED")
+# Absolute path so the mount works regardless of caller cwd.
+SEED_ABS=$(cd "$(dirname "$SEED")" && pwd)/$(basename "$SEED")
 
-WORK="$(mktemp -d)"
-cleanup() { rm -rf "$WORK"; }
-trap cleanup EXIT
+echo "==> recreating volume $VOL from scratch"
+docker volume rm "$VOL" >/dev/null 2>&1 || true
+docker volume create "$VOL" >/dev/null
 
-echo "==> extracting seed members"
-tar -xzf "$SEED" -C "$WORK"
-[ -f "$WORK/mongo.archive.gz" ] || { echo "ERROR: seed missing mongo.archive.gz" >&2; exit 1; }
-[ -f "$WORK/data.tgz" ]         || { echo "ERROR: seed missing data.tgz" >&2; exit 1; }
-
-# --- recreate target volumes from scratch -----------------------------------
-for v in "$MONGO_VOL" "$DATA_VOL"; do
-  echo "==> recreating volume $v from scratch"
-  docker volume rm "$v" >/dev/null 2>&1 || true
-  docker volume create "$v" >/dev/null
-done
-
-# --- restore the Mongo dump into a throwaway mongod -------------------------
-echo "==> booting a throwaway mongod against $MONGO_VOL to load the dump"
-MONGO_CID=$(docker run -d --rm \
-  -e MONGO_INITDB_ROOT_USERNAME="$MONGO_ROOT_USER" \
-  -e MONGO_INITDB_ROOT_PASSWORD="$MONGO_ROOT_PASS" \
-  -v "$MONGO_VOL":/data/db \
-  -v "$WORK":/seed:ro \
-  mongo:7.0)
-
-mongo_down() { docker stop "$MONGO_CID" >/dev/null 2>&1 || true; }
-trap 'mongo_down; cleanup' EXIT
-
-echo "==> waiting for the throwaway mongod to accept connections"
-for i in $(seq 1 60); do
-  if docker exec "$MONGO_CID" mongosh --quiet \
-       -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
-       --eval 'db.adminCommand({ping:1})' >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-  [ "$i" -lt 60 ] || { echo "ERROR: throwaway mongod never became ready" >&2; exit 1; }
-done
-
-echo "==> (re)creating the '$MONGO_APP_USER' app user on admin (not in the dump)"
-docker exec "$MONGO_CID" mongosh --quiet \
-  -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASS" --authenticationDatabase admin \
-  --eval "db.getSiblingDB('admin').createUser({user:'$MONGO_APP_USER',pwd:'$MONGO_APP_PASS',roles:[{role:'dbOwner',db:'unifi'},{role:'dbOwner',db:'unifi_stat'},{role:'dbOwner',db:'unifi_audit'}]})" \
-  >/dev/null 2>&1 || echo "    (app user already present — continuing)"
-
-echo "==> mongorestore (--archive --gzip)"
-docker exec "$MONGO_CID" sh -c \
-  "mongorestore --username '$MONGO_ROOT_USER' --password '$MONGO_ROOT_PASS' \
-     --authenticationDatabase admin --gzip --archive=/seed/mongo.archive.gz --drop"
-
-echo "==> shutting the throwaway mongod down (volume now seeded)"
-mongo_down
-trap cleanup EXIT
-
-# --- restore the controller data dir ----------------------------------------
-echo "==> untarring data dir into $DATA_VOL (perms preserved)"
+echo "==> untarring seed into $VOL (perms preserved)"
 docker run --rm \
-  -v "$WORK":/seed:ro \
-  -v "$DATA_VOL":/data \
+  -v "$VOL":/unifi \
+  -v "$SEED_ABS":/seed/unifi-seed.tgz:ro \
   alpine:3 \
-  sh -c "tar -xpzf /seed/data.tgz -C /data"
+  sh -c "tar -xpzf /seed/unifi-seed.tgz -C /unifi && rm -f /unifi/data/postgresql/postmaster.pid /unifi/db/mongod.lock 2>/dev/null; true"
 
 echo "==> restore complete"

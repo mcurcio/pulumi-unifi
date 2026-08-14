@@ -4,13 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-**Read path + write-path codegen complete (BUILD-PLAN Phases 1–3; Phase 4 at Tier-1).** The Go
-module, deterministic codegen (`schema.json`/`metadata.json`/`openapi_generated.yml`), Python SDK,
-provider config, read path, and a two-tier test harness all exist. Phase 4 write enablement has
-landed at Tier-1: `coalesceDiscriminatedCRUD` (all 21 resources now round-trip full CRUD),
-`allowInsecure`, and list-pagination auto-aggregation, verified by unit tests + the Prism write
-dispatch test. Remaining: the live Tier-2 round-trip (infra-gated on `test/e2e/` provisioning) and
-Phase 5 (CI/release). Read [docs/DESIGN.md](docs/DESIGN.md) for architecture,
+**Read path + write-path codegen complete AND the live Tier-2 round-trip works (BUILD-PLAN Phases
+1–4).** The Go module, deterministic codegen (`schema.json`/`metadata.json`/`openapi_generated.yml`),
+Python SDK, provider config, read path, and a test harness all exist. Phase 4 write enablement landed
+at Tier-1 (`coalesceDiscriminatedCRUD` — all 21 resources round-trip full CRUD — `allowInsecure`, and
+list-pagination auto-aggregation, verified by unit tests + the Prism write-dispatch test) AND is now
+proven live: `make test-e2e` runs a real authenticated Create→Read→Diff→Update→Delete round-trip
+(`DnsARecord`) + a live data-source read against a **real UniFi OS Server** restored from a committed
+seed. **Key finding:** the Integration API is UniFi-OS-coupled — the standalone Network app refuses it
+(403, mode-refusal), so the live tier MUST use the heavy `hieutq/unifi-os-server` image and is
+therefore an **offline/local tier, not stock CI** (see `test/e2e/README.md`). Remaining: Phase 5
+(release) and CI for Tier-1 only. Read [docs/DESIGN.md](docs/DESIGN.md) for architecture,
 [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for the sequence. All work happens in this repo; **do not
 modify the separate `iac` repo** — consuming the SDK there is a later, separate effort.
 
@@ -98,8 +102,13 @@ Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
   callbacks. Default gate. **`make test-mock`** (Docker): reads a data source and dispatches
   create/update/delete through the real provider over TLS against a Prism mock of
   `openapi_generated.yml` behind a Caddy TLS front (cert trusted via `allowInsecure`).
-- **Tier 2 — `test/e2e/`**: UniFi OS Server container (the only thing serving the Integration API). Open
-  infra task is provisioning (no headless first-run / key-minting API).
+- **Tier 2 — `make test-e2e`** (Docker + caps; OFFLINE/local, not stock CI): restores a committed seed
+  (a full `uos_data` volume snapshot — Mongo + Postgres-with-the-key-secret + configs, since `/data`
+  symlinks into `/unifi`) into a real **UniFi OS Server** (`hieutq/unifi-os-server`, pinned by digest —
+  the only image that authenticates the Integration API), JSON-gates readiness, then runs a real
+  authenticated CRUD round-trip + live read. The one-time bake (`make e2e-bootstrap`) needs a manual
+  first-run wizard + key mint (no headless API); thereafter every run is deterministic. See
+  `test/e2e/README.md`.
 
 ## Gotchas
 

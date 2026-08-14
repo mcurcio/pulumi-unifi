@@ -33,10 +33,13 @@ import (
 	pulumirpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 )
 
-// e2eSiteID is the site the live tests scope to. A bare controller restored from
-// seed has a single site under the conventional "default" alias, which the
-// Integration API accepts (unlike the Prism mock, which enforces format:uuid).
-const e2eSiteID = "default"
+// e2ePlaceholderSiteID is a harmless stand-in used only by provider calls that do
+// NOT substitute {siteId} (getCountry, listSiteOverviews). The REAL controller
+// rejects the "default" alias on siteId-scoped paths ("'default' is not a valid
+// 'siteId' value") — it requires the site's UUID — so TestE2ECRUDRoundTrip
+// discovers the real id at runtime (discoverSiteID) instead of hardcoding it.
+// (The Prism mock accepted "default"; the live controller does not.)
+const e2ePlaceholderSiteID = "default"
 
 // Live tokens. getCountry has no path params (isolates auth+decode); the
 // DnsARecord resource is the simplest discriminated write variant — no foreign
@@ -51,6 +54,14 @@ const (
 // test if either is unset, so a bare `go test -tags e2e ./...` (e.g. the static
 // compile check) does not require a controller.
 func newE2EProvider(t *testing.T) (pulumirpc.ResourceProviderServer, context.Context) {
+	return newConfiguredProvider(t, e2ePlaceholderSiteID)
+}
+
+// newConfiguredProvider builds the real provider and Configures it against the
+// live controller (addr from UNIFI_E2E_ADDR, key from UNIFI_APIKEY), scoped to
+// siteID. It skips the test if either env var is unset, so a bare `go test -tags
+// e2e ./...` (e.g. the static compile check) does not require a controller.
+func newConfiguredProvider(t *testing.T, siteID string) (pulumirpc.ResourceProviderServer, context.Context) {
 	t.Helper()
 
 	addr := os.Getenv("UNIFI_E2E_ADDR")
@@ -80,13 +91,49 @@ func newE2EProvider(t *testing.T) (pulumirpc.ResourceProviderServer, context.Con
 		Variables: map[string]string{
 			"unifi:config:apiKey":        apiKey,
 			"unifi:config:apiHost":       addr,
-			"unifi:config:siteId":        e2eSiteID,
+			"unifi:config:siteId":        siteID,
 			"unifi:config:allowInsecure": "true",
 		},
 	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	return rp, ctx
+}
+
+// discoverSiteID resolves the live controller's real site UUID by invoking the
+// siteId-less listSiteOverviews data source and taking the first site's id. The
+// Integration API requires the UUID (not the "default" alias) on siteId-scoped
+// paths, and the id is controller/seed-specific, so the CRUD test discovers it at
+// runtime rather than hardcoding — keeping the test correct across seed re-bakes.
+func discoverSiteID(t *testing.T, rp pulumirpc.ResourceProviderServer, ctx context.Context) string {
+	t.Helper()
+	resp, err := rp.Invoke(ctx, &pulumirpc.InvokeRequest{
+		Tok:  "unifi:sites/v1:listSiteOverviews",
+		Args: mustMarshalE2E(t, resource.PropertyMap{}),
+	})
+	if err != nil {
+		t.Fatalf("Invoke(listSiteOverviews): %v", err)
+	}
+	if fs := resp.GetFailures(); len(fs) > 0 {
+		t.Fatalf("Invoke(listSiteOverviews) returned failures: %v", fs)
+	}
+	out, err := plugin.UnmarshalProperties(resp.GetReturn(), plugin.MarshalOptions{})
+	if err != nil {
+		t.Fatalf("unmarshal listSiteOverviews return: %v", err)
+	}
+	data, ok := out["data"]
+	if !ok || !data.IsArray() || len(data.ArrayValue()) == 0 {
+		t.Fatalf("listSiteOverviews returned no sites (got %v); cannot scope the CRUD test", out)
+	}
+	first := data.ArrayValue()[0]
+	if !first.IsObject() {
+		t.Fatalf("listSiteOverviews data[0] is not an object: %v", first)
+	}
+	id := first.ObjectValue()["id"]
+	if !id.IsString() || id.StringValue() == "" {
+		t.Fatalf("listSiteOverviews data[0].id missing/empty: %v", first)
+	}
+	return id.StringValue()
 }
 
 func mustMarshalE2E(t *testing.T, pm resource.PropertyMap) *structpb.Struct {
@@ -134,16 +181,32 @@ func TestE2ELiveRead(t *testing.T) {
 // (no networkIds / zone refs), so it provisions on a bare site with nothing else
 // present.
 func TestE2ECRUDRoundTrip(t *testing.T) {
-	rp, ctx := newE2EProvider(t)
+	// The live API rejects the "default" siteId alias on siteId-scoped paths, so
+	// discover the controller's real site UUID and scope a provider to it.
+	disc, ctx := newE2EProvider(t)
+	siteID := discoverSiteID(t, disc, ctx)
+	rp, ctx := newConfiguredProvider(t, siteID)
 
 	const domain = "pulumi-e2e.example.com"
 	urn := "urn:pulumi:test::test::" + e2eDnsRecordTok + "::pulumi-e2e-a-record"
 
 	// --- Create -------------------------------------------------------------
+	// `type` is the discriminator: schema.json pins it to const+default
+	// "A_RECORD" (discriminatorInjectPass), which the *generated SDK* materializes
+	// and sends (dns_a_record.py: `if type is None: type = 'A_RECORD'`). The
+	// framework does NOT apply Pulumi schema defaults (its Check only auto-names),
+	// so a gRPC-level caller like this test must supply the discriminator itself to
+	// mirror exactly what the provider receives from the SDK in production.
+	// ttlSeconds is required by the per-variant body (IntegrationDnsARecordCreateUpdateDto)
+	// even though the parent Create_or_update_DNS_policy schema — which the framework
+	// validates against client-side — does not list it; the controller enforces it
+	// (400 "ttlSeconds must not be null" without it).
 	createInputs := resource.PropertyMap{
+		"type":        resource.NewStringProperty("A_RECORD"),
 		"enabled":     resource.NewBoolProperty(true),
 		"domain":      resource.NewStringProperty(domain),
 		"ipv4Address": resource.NewStringProperty("10.255.0.1"),
+		"ttlSeconds":  resource.NewNumberProperty(3600),
 	}
 	cresp, err := rp.Create(ctx, &pulumirpc.CreateRequest{
 		Urn:        urn,
@@ -211,9 +274,11 @@ func TestE2ECRUDRoundTrip(t *testing.T) {
 
 	// --- Update (change the IPv4 address) -----------------------------------
 	updatedInputs := resource.PropertyMap{
+		"type":        resource.NewStringProperty("A_RECORD"),
 		"enabled":     resource.NewBoolProperty(true),
 		"domain":      resource.NewStringProperty(domain),
 		"ipv4Address": resource.NewStringProperty("10.255.0.2"),
+		"ttlSeconds":  resource.NewNumberProperty(3600),
 	}
 	if _, err := rp.Update(ctx, &pulumirpc.UpdateRequest{
 		Urn:       urn,

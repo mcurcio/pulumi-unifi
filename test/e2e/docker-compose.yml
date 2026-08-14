@@ -1,87 +1,81 @@
-# Tier-2 e2e: a real UniFi Network controller serving the official Integration
-# API, assembled from three PLAIN, privilege-free containers — no systemd, no
-# capabilities, no privileged, no cgroup host namespace, nothing that needs an
-# elevated/self-hosted runner. This runs on stock GitHub-hosted runners.
+# Tier-2 live e2e: a REAL UniFi OS Server controller serving the official
+# Integration API, restored from a committed seed snapshot. This is the only tier
+# that proves what the stateless Prism mock (Tier-1) structurally cannot — real
+# X-API-Key auth, real decode of live data, and a true create→read→update→delete
+# round-trip with persisted state.
 #
-# Why this works (the lean pivot): the heavy "UniFi OS Server" image was needed
-# only because we assumed the Integration API lived behind UniFi OS's edge proxy.
-# It does not — the plain linuxserver/unifi-network-application container serves
-# the Integration API directly at /integration/v1/... (UniFi OS merely PREPENDS
-# the external /proxy/network prefix). A GET /integration/v1/sites on the bare
-# container returns 403 (auth-gated, needs an X-API-Key), proving the surface is
-# present. So we put a Caddy front in front that strips /proxy/network — exactly
-# like the Tier-1 mock — and the provider's
-# /proxy/network/integration/v1/... requests land on the app's /integration/v1.
+# WHY THE HEAVY IMAGE (and not a plain Network-app container): the Integration API
+# is architecturally coupled to UniFi OS. The standalone Network app does NOT
+# serve it — it returns 403 `api.forbidden` on every request, on a mode that never
+# even opens the dedicated integration endpoint. Authorization is delegated to
+# UniFi OS's `unifi-core` (validates the key in Postgres, injects trusted headers
+# via an nginx auth_request). Only the full UniFi OS image carries both halves, so
+# it is the only thing that can authenticate the Integration API. (Verified
+# empirically — see test/e2e/README.md "Why the heavy image".)
 #
-# Three services:
-#   mongo  — the controller's datastore (the app image needs an external Mongo).
-#   unifi  — a THIN, version-LOCKED controller built from ./controller (the
-#            pinned 10.4.57 .deb on a Temurin-25 JRE — see controller/README.md),
-#            replacing linuxserver/unifi-network-application so the live tier runs
-#            on the EXACT spec version. Same external-mongo env contract.
-#   tls    — Caddy: terminates TLS on :443 and rewrites /proxy/network/* to the
-#            app's https://unifi:8443/... (the prefix the provider speaks).
+# CONSEQUENCE: this stack needs systemd (PID 1) + caps + a host cgroup mount, so
+# it is an OFFLINE / local tier — NOT stock GitHub CI. That tradeoff is accepted
+# in exchange for a genuine live round-trip. Tier-1 (`make test`, `make test-mock`)
+# remains the portable, zero-privilege gate.
 #
 # Two flows drive this file (see README.md):
-#   - make e2e-bootstrap : ONE-TIME — boot the stack, complete the wizard + mint
-#     a key by hand (https://localhost:8443), then snapshot the SEED compactly
-#     (mongodump --archive --gzip + a tar of /config) into unifi-seed.tgz.
-#   - make test-e2e      : REPEATABLE — restore the seed into fresh mongo+config
-#     volumes, boot, and run the live Go tests through Caddy on :11443.
-
+#   - make e2e-bootstrap : ONE-TIME — boot BLANK (see mint/), complete the wizard +
+#     mint a key by hand, then snapshot the uos_data volume into unifi-seed.tgz.
+#   - make test-e2e      : REPEATABLE — restore.sh loads the seed into a fresh
+#     uos_data volume, boots this stack, and runs the live Go tests on :11443.
 services:
-  mongo:
-    image: mongo:7.0
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: rootpass
+  uos:
+    # Community repackage of Ubiquiti's UniFi OS Server installer (bundles UniFi
+    # Network 10.4.57 in UniFi OS 5.1.15). PINNED BY DIGEST (pin-and-verify ethos,
+    # cf. openapi/fetch.sh) so the restored volume's Postgres/Mongo data always
+    # matches the exact DB versions that wrote it. Re-pin on a version bump.
+    image: hieutq/unifi-os-server@sha256:3e8854769d634ed5b7b4610b187479226fb8f47178552d1764b1b1db68c8621e
+    # Full UniFi OS = systemd PID 1 managing ~10 services (unifi-core, Postgres,
+    # Mongo, nginx, the Network app, rabbitmq…). These privileges are the price of
+    # the only image that authenticates the Integration API. This is why the tier
+    # is offline/local, not CI.
+    cgroup: host
+    cap_drop: [ALL]
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+      - DAC_OVERRIDE
+      - DAC_READ_SEARCH
+      - FOWNER
+      - CHOWN
+      - SETUID
+      - SETGID
+      - KILL
+      - SYS_CHROOT
+      - SYS_PTRACE
+      - SYS_RESOURCE
+      - AUDIT_WRITE
+      - MKNOD
+    tmpfs:
+      - /run:exec
+      - /run/lock
+      - /tmp:exec
+      - /var/lib/journal
+      - /var/opt/unifi/tmp:size=64m
     volumes:
-      # init-mongo.js runs once on a FRESH data volume: it creates the `unifi`
-      # application user (dbOwner on the app DBs) the Network app authenticates
-      # as. It is a no-op on an already-initialized volume (e.g. after restore.sh
-      # has loaded a dump), which is exactly what we want.
-      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
-      - mongo_data:/data/db
-
-  unifi:
-    # Thin pinned-10.4.57 image (Dockerfile in ./controller). Compose builds it
-    # on `up`; `make test-e2e` / `e2e-bootstrap` run an explicit `compose build`
-    # first so `--wait` doesn't race the build.
-    build:
-      context: ./controller
-    depends_on:
-      - mongo
-    environment:
-      # PUID/PGID are a linuxserver-ism; the custom image runs as root (throwaway
-      # test controller) and ignores them. Kept out for clarity.
-      TZ: Etc/UTC
-      MONGO_HOST: mongo
-      MONGO_PORT: "27017"
-      MONGO_DBNAME: unifi
-      MONGO_USER: unifi
-      MONGO_PASS: unifipass
-      MONGO_AUTHSOURCE: admin
-    volumes:
-      # The custom image's data dir is /usr/lib/unifi/data (the .deb's layout),
-      # NOT linuxserver's /config. The seed's keystore + system.properties live
-      # here; restore.sh / bootstrap.sh tar this path.
-      - unifi_data:/usr/lib/unifi/data
+      # ALL persistent state lives here: /data is a symlink to /unifi/data, so
+      # Mongo (/unifi/db), Postgres (/unifi/data/postgresql — holds the api_key
+      # secret) and configs are all in this one volume. restore.sh recreates it
+      # from the seed before `up`, so the minted key validates on boot.
+      - uos_data:/unifi
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
     ports:
-      # Direct app GUI/API over TLS — the bootstrap wizard is reached here.
-      - "8443:8443"
-
-  tls:
-    image: caddy:2
-    depends_on:
-      - unifi
-    ports:
-      # The provider + tests hit Caddy here; it strips /proxy/network and proxies
-      # to the app's /integration/... on https://unifi:8443.
-      - "11443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./certs:/certs:ro
+      - "11443:443"   # UniFi OS edge → Integration API at /proxy/network/integration/v1/...
+    healthcheck:
+      # Ready when the Integration API answers TLS (401 without a key is fine — it
+      # means the edge + unifi-core + Network app are all up and routing).
+      test: ["CMD", "sh", "-c", "curl -ksf -o /dev/null -w '%{http_code}' https://localhost:443/proxy/network/integration/v1/sites | grep -qE '200|401|403'"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 240s
 
 volumes:
-  mongo_data:
-  unifi_data:
+  uos_data:

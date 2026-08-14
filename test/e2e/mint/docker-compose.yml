@@ -1,0 +1,70 @@
+# ONE-OFF key-mint stack (heavy UniFi OS Server) — NOT used by make test-e2e.
+#
+# Why this exists: minting an X-API-Key has no headless flow — Ubiquiti gates key
+# creation behind the UniFi OS first-run wizard + Integrations UI. So bootstrap.sh
+# boots THIS heavy stack BLANK on a fresh volume, the maintainer completes the
+# wizard and mints a key by hand, then we snapshot the whole uos_data volume into
+# the committed seed (../unifi-seed.tgz). The live tier (../docker-compose.yml) is
+# the SAME heavy image, so the snapshot restores into it verbatim and the key
+# validates forever (the seed carries Postgres, which stores the key secret). See
+# test/e2e/mint/README.md for the runbook and test/e2e/README.md for the overall
+# heavy / offline architecture.
+#
+# This stack is identical to the live tier except for OFFSET ports, so the mint and
+# the test runs never collide. It's a manual, occasional tool (re-mint on a
+# controller version bump) — invoked only by bootstrap.sh, never the test path.
+#
+# Image: community repackage of Ubiquiti's UniFi OS Server installer (bundles
+# UniFi Network 10.4.57 in UniFi OS 5.1.15). Unofficial — provenance note in README.
+# PINNED BY DIGEST so the mint stack is byte-identical to the live tier
+# (../docker-compose.yml). Keep the two in lockstep on a version bump.
+#
+# Ports are deliberately OFFSET (11444, 8444) so this can run alongside the live
+# tier (11443) without collision.
+services:
+  uos:
+    image: hieutq/unifi-os-server@sha256:3e8854769d634ed5b7b4610b187479226fb8f47178552d1764b1b1db68c8621e
+    # Full UniFi OS = systemd PID 1 managing 10+ services → it needs these. These
+    # privileges are why the whole tier is offline/local; this stack runs once, by
+    # hand, to bake the seed.
+    cgroup: host
+    cap_drop: [ALL]
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+      - DAC_OVERRIDE
+      - DAC_READ_SEARCH
+      - FOWNER
+      - CHOWN
+      - SETUID
+      - SETGID
+      - KILL
+      - SYS_CHROOT
+      - SYS_PTRACE
+      - SYS_RESOURCE
+      - AUDIT_WRITE
+      - MKNOD
+    tmpfs:
+      - /run:exec
+      - /run/lock
+      - /tmp:exec
+      - /var/lib/journal
+      - /var/opt/unifi/tmp:size=64m
+    volumes:
+      - uos_data:/unifi
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    ports:
+      - "11444:443"   # UniFi OS UI + Integration API (offset from the live tier's 11443)
+      - "8444:8443"    # classic Network app UI
+    healthcheck:
+      # Ready when the Integration API answers TLS (401 without a key is fine).
+      test: ["CMD", "sh", "-c", "curl -ksf -o /dev/null -w '%{http_code}' https://localhost:443/proxy/network/integration/v1/sites | grep -qE '200|401|403'"]
+      interval: 30s
+      timeout: 10s
+      retries: 40
+      start_period: 180s
+
+volumes:
+  uos_data:
