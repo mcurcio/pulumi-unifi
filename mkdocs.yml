@@ -1,0 +1,50 @@
+site_name: pulumi-unifi
+site_url: https://mcurcio.github.io/pulumi-unifi/
+site_description: >-
+  A code-generated, native Pulumi provider for Ubiquiti's official UniFi Network
+  Integration API.
+repo_url: https://github.com/mcurcio/pulumi-unifi
+repo_name: mcurcio/pulumi-unifi
+
+# Narrative pages are hand-written under docs/site/. reference.md is generated
+# by docs/gen_reference.py (a gitignored, disposable stopgap) and must exist
+# before `mkdocs build --strict` runs — `make docs` regenerates it first.
+docs_dir: docs/site
+
+theme:
+  name: material
+  features:
+    # All of these ship with mkdocs-material — no extra pip deps.
+    - navigation.instant
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+extra:
+  version:
+    provider: mike
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Authentication: authentication.md
+  - Getting Started: getting-started.md
+  - Examples: examples.md
+  - Compatibility: compatibility.md
+  - Reference: reference.md
