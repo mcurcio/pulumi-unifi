@@ -45,16 +45,31 @@ def type_name(ref):
     return ref.rsplit(":", 1)[-1]
 
 
+def ref_type_name(ref):
+    """Render any schema $ref as a short, readable type string.
+
+    - '#/types/unifi:...:FirewallPolicySource' -> 'FirewallPolicySource'
+      (the token after the final ':').
+    - 'pulumi.json#/Any' / '.../Asset' / '.../Archive' -> the final path
+      segment lowercased ('any', 'asset', 'archive').
+    - Anything else -> a clean fallback: the final segment after the last
+      '/' or ':', never the raw 'pulumi.json#/...' string.
+    """
+    if ref.startswith("#/types/"):
+        return type_name(ref)
+    if ref.startswith("pulumi.json#/"):
+        return ref.rsplit("/", 1)[-1].lower()
+    # Unexpected shape: take the final path/token segment.
+    tail = ref.rsplit("/", 1)[-1]
+    return tail.rsplit(":", 1)[-1]
+
+
 def render_type(prop):
     """Render a Pulumi property type spec as a short, readable string."""
     if not isinstance(prop, dict):
         return "-"
     if "$ref" in prop:
-        ref = prop["$ref"]
-        if ref.startswith("#/types/"):
-            return "`%s`" % type_name(ref)
-        # pulumi:pulumi:Any and similar special refs
-        return "`%s`" % type_name(ref)
+        return "`%s`" % ref_type_name(prop["$ref"])
     t = prop.get("type")
     if t == "array":
         return "List&lt;%s&gt;" % _inner(render_type(prop.get("items", {})))
