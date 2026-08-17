@@ -22,7 +22,7 @@ BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: ensure fetch gen generate_schema python_sdk generate build install test test-mock test-sdk e2e-bootstrap test-e2e clean
+.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check build install test test-mock test-sdk e2e-bootstrap test-e2e clean
 
 MOCK_COMPOSE := test/mock/docker-compose.yml
 # The Tier-2 live-e2e pipeline — project name, compose file, seed, volume, ports,
@@ -57,6 +57,22 @@ python_sdk:: generate_schema
 
 # Deterministic umbrella: fetch + regenerate every build artifact from the pinned spec.
 generate:: python_sdk
+
+# Deliberate REBASE of the owned contract goldens. Regenerates schema.json +
+# metadata.json from the pinned spec (via generate_schema, the entrypoint writer)
+# and rebases the tokens.txt projection. This is the ONLY sanctioned way to move
+# the public surface; review the resulting git diff before committing. (Does NOT
+# touch reference.md — that artifact is not part of the contract.)
+schema:: generate_schema
+	cd provider && UPDATE_GOLDEN=1 go test -count=1 -run TestTokenSetMatchesGolden ./pkg/gen/
+	@echo "schema goldens rebased — review the git diff before committing"
+
+# HARD read-only contract gate. Regenerates the surface IN-PROCESS and asserts it
+# equals the committed goldens; never mutates committed files. Runs over
+# ./pkg/gen/ ONLY (it embeds just mappings.yaml, so it compiles without the cmd
+# package's gitignored embeds). Fails on any drift.
+schema-check:: $(SPEC)
+	cd provider && go test -count=1 -run 'TestSchemaMatchesGolden|TestTokenSetMatchesGolden' ./pkg/gen/
 
 # Build the provider plugin binary. Depends on generate_schema so the //go:embed
 # inputs (schema.json/metadata.json/openapi_generated.yml) exist at compile time.

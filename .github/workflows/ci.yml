@@ -84,6 +84,24 @@ jobs:
       - name: make test-sdk
         run: make test-sdk
 
+  # Strong API-contract gate (required): the committed schema.json is the frozen
+  # public-API golden. Regenerate in-process from the pinned spec and assert
+  # byte-equality — an upstream churn that alters the surface without a reviewed
+  # `make schema` rebase turns this red. Runs over ./pkg/gen/ only (embeds just
+  # mappings.yaml): no Docker, Python, or Pulumi, and no cmd-package embeds.
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: provider/go.sum
+      - name: make schema-check
+        run: make schema-check
+
   # Tier-1 mock tier (Docker): read + write dispatch through the real provider over
   # TLS against the Prism mock. Separate job because it needs Docker.
   test-mock:
