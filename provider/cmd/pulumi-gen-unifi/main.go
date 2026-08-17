@@ -10,7 +10,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -93,7 +92,7 @@ func main() {
 
 		mustWritePulumiSchema(schemaSpec, outDir)
 
-		metadataBytes, err := json.Marshal(metadata)
+		metadataBytes, err := providerSchemaGen.MarshalMetadataJSON(metadata)
 		if err != nil {
 			panic(fmt.Errorf("marshaling metadata: %w", err))
 		}
@@ -110,10 +109,7 @@ func main() {
 }
 
 func mustWritePulumiSchema(pkgSpec schema.PackageSpec, outDir string) {
-	// The version is injected into the binary at build time, not baked into the
-	// committed schema, so generation stays deterministic across versions.
-	pkgSpec.Version = ""
-	schemaJSON, err := json.MarshalIndent(pkgSpec, "", "    ")
+	schemaJSON, err := providerSchemaGen.MarshalSchemaJSON(pkgSpec)
 	if err != nil {
 		panic(fmt.Errorf("marshaling Pulumi schema: %w", err))
 	}

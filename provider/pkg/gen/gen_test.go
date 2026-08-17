@@ -1,7 +1,6 @@
 package gen
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,11 +63,11 @@ func runPipeline(t *testing.T, specBytes []byte) (schemaJSON, metadataJSON, open
 	}
 	pkg, metadata, updatedDoc := PulumiSchema(*doc)
 
-	schemaJSON, err = json.MarshalIndent(pkg, "", "    ")
+	schemaJSON, err = MarshalSchemaJSON(pkg)
 	if err != nil {
 		t.Fatalf("marshal schema: %v", err)
 	}
-	metadataJSON, err = json.Marshal(metadata)
+	metadataJSON, err = MarshalMetadataJSON(metadata)
 	if err != nil {
 		t.Fatalf("marshal metadata: %v", err)
 	}
