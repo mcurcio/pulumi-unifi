@@ -22,7 +22,7 @@ BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check build install test test-mock test-sdk e2e-bootstrap test-e2e clean
+.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e clean
 
 MOCK_COMPOSE := test/mock/docker-compose.yml
 # The Tier-2 live-e2e pipeline — project name, compose file, seed, volume, ports,
@@ -72,7 +72,13 @@ schema:: generate_schema
 # ./pkg/gen/ ONLY (it embeds just mappings.yaml, so it compiles without the cmd
 # package's gitignored embeds). Fails on any drift.
 schema-check:: $(SPEC)
-	cd provider && go test -count=1 -run 'TestSchemaMatchesGolden|TestMetadataMatchesGolden|TestTokenSetMatchesGolden' ./pkg/gen/
+	cd provider && go test -count=1 -run 'TestSchemaMatchesGolden|TestMetadataMatchesGolden|TestTokenSetMatchesGolden|TestContractLint' ./pkg/gen/
+
+# HARD convention-linter gate (subset of schema-check). Loads the COMMITTED
+# schema.json golden and asserts the naming/shape/secret/immutable invariants
+# (design §3.4). Kept as a named target for local use; reads only ./pkg/gen/.
+lint-schema::
+	cd provider && go test -count=1 -run 'TestContractLint' ./pkg/gen/
 
 # Build the provider plugin binary. Depends on generate_schema so the //go:embed
 # inputs (schema.json/metadata.json/openapi_generated.yml) exist at compile time.
