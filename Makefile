@@ -72,7 +72,7 @@ schema:: generate_schema
 # ./pkg/gen/ ONLY (it embeds just mappings.yaml, so it compiles without the cmd
 # package's gitignored embeds). Fails on any drift.
 schema-check:: $(SPEC)
-	cd provider && go test -count=1 -run 'TestSchemaMatchesGolden|TestTokenSetMatchesGolden' ./pkg/gen/
+	cd provider && go test -count=1 -run 'TestSchemaMatchesGolden|TestMetadataMatchesGolden|TestTokenSetMatchesGolden' ./pkg/gen/
 
 # Build the provider plugin binary. Depends on generate_schema so the //go:embed
 # inputs (schema.json/metadata.json/openapi_generated.yml) exist at compile time.

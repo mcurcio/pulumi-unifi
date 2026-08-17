@@ -1,0 +1,280 @@
+{
+    "crudMap": {
+        "unifi:countries/v1:getCountry": {
+            "r": "/v1/countries"
+        },
+        "unifi:dpi/v1:getDpiApplication": {
+            "r": "/v1/dpi/applications"
+        },
+        "unifi:dpi/v1:getDpiApplicationCategory": {
+            "r": "/v1/dpi/categories"
+        },
+        "unifi:info/v1:getInfo": {
+            "r": "/v1/info"
+        },
+        "unifi:pending-devices/v1:listPendingDevices": {
+            "r": "/v1/pending-devices"
+        },
+        "unifi:sites/v1:DnsARecord": {
+            "c": "/v1/sites/{siteId}/dns/policies",
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "d": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "p": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:DnsAaaaRecord": {
+            "c": "/v1/sites/{siteId}/dns/policies",
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "d": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "p": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:DnsCnameRecord": {
+            "c": "/v1/sites/{siteId}/dns/policies",
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "d": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "p": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:DnsForwardDomain": {
+            "c": "/v1/sites/{siteId}/dns/policies",
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "d": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "p": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:DnsMxRecord": {
+            "c": "/v1/sites/{siteId}/dns/policies",
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "d": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "p": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:DnsSrvRecord": {
+            "c": "/v1/sites/{siteId}/dns/policies",
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "d": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "p": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:DnsTxtRecord": {
+            "c": "/v1/sites/{siteId}/dns/policies",
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "d": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
+            "p": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:FirewallPolicy": {
+            "c": "/v1/sites/{siteId}/firewall/policies",
+            "r": "/v1/sites/{siteId}/firewall/policies/{firewallPolicyId}",
+            "u": "/v1/sites/{siteId}/firewall/policies/{firewallPolicyId}",
+            "d": "/v1/sites/{siteId}/firewall/policies/{firewallPolicyId}",
+            "p": "/v1/sites/{siteId}/firewall/policies/{firewallPolicyId}"
+        },
+        "unifi:sites/v1:FirewallZone": {
+            "c": "/v1/sites/{siteId}/firewall/zones",
+            "r": "/v1/sites/{siteId}/firewall/zones/{firewallZoneId}",
+            "d": "/v1/sites/{siteId}/firewall/zones/{firewallZoneId}",
+            "p": "/v1/sites/{siteId}/firewall/zones/{firewallZoneId}"
+        },
+        "unifi:sites/v1:ManagedNetworkGateway": {
+            "c": "/v1/sites/{siteId}/networks",
+            "r": "/v1/sites/{siteId}/networks/{networkId}",
+            "d": "/v1/sites/{siteId}/networks/{networkId}",
+            "p": "/v1/sites/{siteId}/networks/{networkId}"
+        },
+        "unifi:sites/v1:ManagedNetworkSwitch": {
+            "c": "/v1/sites/{siteId}/networks",
+            "r": "/v1/sites/{siteId}/networks/{networkId}",
+            "d": "/v1/sites/{siteId}/networks/{networkId}",
+            "p": "/v1/sites/{siteId}/networks/{networkId}"
+        },
+        "unifi:sites/v1:ManagedNetworkUnmanaged": {
+            "c": "/v1/sites/{siteId}/networks",
+            "r": "/v1/sites/{siteId}/networks/{networkId}",
+            "d": "/v1/sites/{siteId}/networks/{networkId}",
+            "p": "/v1/sites/{siteId}/networks/{networkId}"
+        },
+        "unifi:sites/v1:TrafficMatchIpv4": {
+            "c": "/v1/sites/{siteId}/acl-rules",
+            "r": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
+            "d": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
+            "p": "/v1/sites/{siteId}/acl-rules/{aclRuleId}"
+        },
+        "unifi:sites/v1:TrafficMatchIpv4Addresses": {
+            "c": "/v1/sites/{siteId}/traffic-matching-lists",
+            "r": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}",
+            "d": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}",
+            "p": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}"
+        },
+        "unifi:sites/v1:TrafficMatchIpv6Addresses": {
+            "c": "/v1/sites/{siteId}/traffic-matching-lists",
+            "r": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}",
+            "d": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}",
+            "p": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}"
+        },
+        "unifi:sites/v1:TrafficMatchMac": {
+            "c": "/v1/sites/{siteId}/acl-rules",
+            "r": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
+            "d": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
+            "p": "/v1/sites/{siteId}/acl-rules/{aclRuleId}"
+        },
+        "unifi:sites/v1:TrafficMatchPorts": {
+            "c": "/v1/sites/{siteId}/traffic-matching-lists",
+            "r": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}",
+            "d": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}",
+            "p": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}"
+        },
+        "unifi:sites/v1:WifiBroadcastIotOptimized": {
+            "c": "/v1/sites/{siteId}/wifi/broadcasts",
+            "r": "/v1/sites/{siteId}/wifi/broadcasts/{wifiBroadcastId}",
+            "d": "/v1/sites/{siteId}/wifi/broadcasts/{wifiBroadcastId}",
+            "p": "/v1/sites/{siteId}/wifi/broadcasts/{wifiBroadcastId}"
+        },
+        "unifi:sites/v1:WifiBroadcastStandard": {
+            "c": "/v1/sites/{siteId}/wifi/broadcasts",
+            "r": "/v1/sites/{siteId}/wifi/broadcasts/{wifiBroadcastId}",
+            "d": "/v1/sites/{siteId}/wifi/broadcasts/{wifiBroadcastId}",
+            "p": "/v1/sites/{siteId}/wifi/broadcasts/{wifiBroadcastId}"
+        },
+        "unifi:sites/v1:getAdoptedDeviceDetail": {
+            "r": "/v1/sites/{siteId}/devices/{deviceId}"
+        },
+        "unifi:sites/v1:getDnsARecord": {
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:getDnsAaaaRecord": {
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:getDnsCnameRecord": {
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:getDnsForwardDomainPolicy": {
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:getDnsMxRecord": {
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:getDnsSrvRecord": {
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:getDnsTxtRecord": {
+            "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}"
+        },
+        "unifi:sites/v1:getFirewallPolicy": {
+            "r": "/v1/sites/{siteId}/firewall/policies/{firewallPolicyId}"
+        },
+        "unifi:sites/v1:getFirewallZone": {
+            "r": "/v1/sites/{siteId}/firewall/zones/{firewallZoneId}"
+        },
+        "unifi:sites/v1:getGatewayManagedNetworkDetails": {
+            "r": "/v1/sites/{siteId}/networks/{networkId}"
+        },
+        "unifi:sites/v1:getIotOptimizedWifiBroadcastDetail": {
+            "r": "/v1/sites/{siteId}/wifi/broadcasts/{wifiBroadcastId}"
+        },
+        "unifi:sites/v1:getIpAclRule": {
+            "r": "/v1/sites/{siteId}/acl-rules/{aclRuleId}"
+        },
+        "unifi:sites/v1:getLocalLagGlobal": {
+            "r": "/v1/sites/{siteId}/switching/lags/{lagId}"
+        },
+        "unifi:sites/v1:getMacAclRule": {
+            "r": "/v1/sites/{siteId}/acl-rules/{aclRuleId}"
+        },
+        "unifi:sites/v1:getMcLagDomain": {
+            "r": "/v1/sites/{siteId}/switching/mc-lag-domains/{mcLagDomainId}"
+        },
+        "unifi:sites/v1:getMcLagGlobal": {
+            "r": "/v1/sites/{siteId}/switching/lags/{lagId}"
+        },
+        "unifi:sites/v1:getStandardWifiBroadcastDetail": {
+            "r": "/v1/sites/{siteId}/wifi/broadcasts/{wifiBroadcastId}"
+        },
+        "unifi:sites/v1:getSwitchManagedNetworkDetails": {
+            "r": "/v1/sites/{siteId}/networks/{networkId}"
+        },
+        "unifi:sites/v1:getSwitchStack": {
+            "r": "/v1/sites/{siteId}/switching/switch-stacks/{switchStackId}"
+        },
+        "unifi:sites/v1:getSwitchStackLagGlobal": {
+            "r": "/v1/sites/{siteId}/switching/lags/{lagId}"
+        },
+        "unifi:sites/v1:getTeleportClientConnectionDetails": {
+            "r": "/v1/sites/{siteId}/clients/{clientId}"
+        },
+        "unifi:sites/v1:getTrafficMatchingList": {
+            "r": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}"
+        },
+        "unifi:sites/v1:getUnmanagedNetworkDetails": {
+            "r": "/v1/sites/{siteId}/networks/{networkId}"
+        },
+        "unifi:sites/v1:getVoucher": {
+            "r": "/v1/sites/{siteId}/hotspot/vouchers/{voucherId}"
+        },
+        "unifi:sites/v1:getVpnClientConnectionDetails": {
+            "r": "/v1/sites/{siteId}/clients/{clientId}"
+        },
+        "unifi:sites/v1:getWiredClientDetails": {
+            "r": "/v1/sites/{siteId}/clients/{clientId}"
+        },
+        "unifi:sites/v1:getWirelessClientDetails": {
+            "r": "/v1/sites/{siteId}/clients/{clientId}"
+        },
+        "unifi:sites/v1:listAclRules": {
+            "r": "/v1/sites/{siteId}/acl-rules"
+        },
+        "unifi:sites/v1:listAdoptedDeviceOverviews": {
+            "r": "/v1/sites/{siteId}/devices"
+        },
+        "unifi:sites/v1:listConnectedClientOverviews": {
+            "r": "/v1/sites/{siteId}/clients"
+        },
+        "unifi:sites/v1:listDeviceTags": {
+            "r": "/v1/sites/{siteId}/device-tags"
+        },
+        "unifi:sites/v1:listDnsPolicies": {
+            "r": "/v1/sites/{siteId}/dns/policies"
+        },
+        "unifi:sites/v1:listFirewallPolicies": {
+            "r": "/v1/sites/{siteId}/firewall/policies"
+        },
+        "unifi:sites/v1:listLags": {
+            "r": "/v1/sites/{siteId}/switching/lags"
+        },
+        "unifi:sites/v1:listMcLagDomains": {
+            "r": "/v1/sites/{siteId}/switching/mc-lag-domains"
+        },
+        "unifi:sites/v1:listNetworksOverviews": {
+            "r": "/v1/sites/{siteId}/networks"
+        },
+        "unifi:sites/v1:listRadiusProfileOverviews": {
+            "r": "/v1/sites/{siteId}/radius/profiles"
+        },
+        "unifi:sites/v1:listSiteOverviews": {
+            "r": "/v1/sites"
+        },
+        "unifi:sites/v1:listSiteToSiteVpnTunnels": {
+            "r": "/v1/sites/{siteId}/vpn/site-to-site-tunnels"
+        },
+        "unifi:sites/v1:listSwitchStacks": {
+            "r": "/v1/sites/{siteId}/switching/switch-stacks"
+        },
+        "unifi:sites/v1:listTrafficMatchingLists": {
+            "r": "/v1/sites/{siteId}/traffic-matching-lists"
+        },
+        "unifi:sites/v1:listVpnServers": {
+            "r": "/v1/sites/{siteId}/vpn/servers"
+        },
+        "unifi:sites/v1:listWansOverviews": {
+            "r": "/v1/sites/{siteId}/wans"
+        },
+        "unifi:sites/v1:listWifiBroadcasts": {
+            "r": "/v1/sites/{siteId}/wifi/broadcasts"
+        }
+    },
+    "autoNameMap": {
+        "unifi:sites/v1:FirewallPolicy": "name",
+        "unifi:sites/v1:FirewallZone": "name"
+    },
+    "sdkToApiNameMap": {
+        "24": "2.4"
+    },
+    "apiToSdkNameMap": {
+        "2.4": "24"
+    },
+    "pathParamNameMap": {}
+}
