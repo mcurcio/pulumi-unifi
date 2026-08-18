@@ -1,6 +1,9 @@
 # Design: The Owned Stable API Contract
 
-Status: PROPOSED (design only — no code in this document)
+Status: IMPLEMENTED on `contract/api-stability` (beads P1/P2/T/A/B/C/K/E/F/G/H).
+The design below is the frozen source of truth; §3.4 and §7 carry errata
+reconciled with the shipped code (TokenGrammar split; property-level descriptions
+deferred).
 Author: code-architect (delivery/maintenance lens)
 Scope: the public-surface stability contract for the `unifi` native codegen provider.
 Revision: 2 (post adversarial review — see §8 Review response for the finding→resolution map).
@@ -371,9 +374,9 @@ Named checks (each a `t.Run(...)` subtest):
 
 | Check | Asserts | Ladder note |
 | --- | --- | --- |
-| `TokenGrammar` | every resource/function token matches `^unifi:[a-z-]+/v\d+:[A-Z][A-Za-z0-9]*$`; functions' short name starts `get`/`list` | test (no cheaper rep for JSON) |
+| `TokenGrammar` | **resources**: every token matches `^unifi:[a-z-]+/v\d+:[A-Z][A-Za-z0-9]*$` (PascalCase short name). **Functions**: every token matches `^unifi:[a-z-]+/v\d+:(get\|list)[A-Z][A-Za-z0-9]*$` (a `get`/`list` short name). The two clauses are jointly unsatisfiable by one regex (a `get`/`list` head is not `[A-Z]`), so the PascalCase grammar is applied to resources and the `get`/`list` grammar to functions — the reading consistent with the shipped artifact. | test (no cheaper rep for JSON) |
 | `ModuleVersionAllowed` | every token's `<module>/<version>` ∈ the module set declared in `docs/api-standards.yaml` | test; binds doc→schema |
-| `NonEmptyDescriptions` | every resource, function, and each of their input/output properties has a non-empty `description` | test; pipeline synthesizes, linter freezes the invariant |
+| `NonEmptyDescriptions` | **top-level only**: every resource, function, and config variable has a non-empty `description`. Property-level (input/output) description coverage is DEFERRED (§7) — the upstream OpenAPI supplies no property descriptions and the pipeline pins only a curated subset, so a property-level assertion would fail on the clean golden. | test; pipeline synthesizes, linter freezes the invariant |
 | `SecretConfig` | every config name in `api-standards.yaml.guarantees.secretConfig` is `secret: true` in the golden config; and no config so-named is un-flagged | test; security-relevant |
 | `SecretTypeProperties` | every `<typeToken>.<prop>` in `api-standards.yaml.guarantees.secretProperties` is `secret: true` on that property of that `#/types` entry in the golden; and cross-checked against `secretTypeProperties` (`pass_secret_fields.go:14`) so the shipped flag, the pipeline source, and the doc agree | test; security-relevant; **covers the type-level secret `unifi:sites/v1:HotspotVoucherDetails.code` that config-only checks missed** |
 | `ImmutableInputs` | every input named in `guarantees.immutableInputs` is listed in `replaceOnChanges` on **every** resource that carries it | test; mirrors pass_replace_on_changes on the frozen surface |
@@ -871,6 +874,12 @@ broken golden is a failed check.
 - `openapi_generated.yml` and SDK-source goldens (internal / not frozen).
 - Generated inventory table in `api-standards.md` (§3.7 — nicety).
 - Multi-language SDK naming guarantees beyond schema-level.
+- **Property-level non-empty descriptions.** The `NonEmptyDescriptions` linter
+  (§3.4) asserts descriptions only at the TOP level (resource/function/config). The
+  upstream OpenAPI supplies no descriptions for most input/output properties and
+  the pipeline pins only a curated subset, so a property-level assertion would fail
+  on the clean golden today. Enriching every property description is a separate
+  codegen investment (synthesize descriptions + rebase the golden), deferred.
 
 ---
 
