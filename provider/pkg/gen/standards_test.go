@@ -194,6 +194,55 @@ func secretPropertiesPipelineMismatch(declared, pipeline map[string][]string) []
 	return out
 }
 
+// secretConfigPipelineMismatch cross-checks the yaml-declared guarantees.secretConfig
+// against the pipeline source (gen.SecretConfigKeys, reading packagespec.go's
+// configKeys) in BOTH directions. Without this reverse binding, DELETING a config
+// name from guarantees.secretConfig would make the check vacuously pass while the
+// pipeline still ships it secret (or, worse, stops flagging a config that must be
+// secret). A declared name the pipeline does not mark secret, or a pipeline-secret
+// config the declaration omits, is reported.
+func secretConfigPipelineMismatch(inv standardsInventory) []string {
+	declared := namesSet(inv.Guarantees.SecretConfig)
+	pipeline := namesSet(SecretConfigKeys())
+	var out []string
+	for name := range declared {
+		if !pipeline[name] {
+			out = append(out, fmt.Sprintf("%s declares config %q secret which the pipeline (configKeys) does not mark secret", standardsInventoryPath, name))
+		}
+	}
+	for name := range pipeline {
+		if !declared[name] {
+			out = append(out, fmt.Sprintf("pipeline (configKeys) marks config %q secret but %s does not declare it in guarantees.secretConfig", name, standardsInventoryPath))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// immutableInputsPipelineMismatch cross-checks the yaml-declared
+// guarantees.immutableInputs against the pipeline source (immutableFieldPins, from
+// mappings.yaml) in BOTH directions. Without this reverse binding, DELETING a name
+// from guarantees.immutableInputs would stop checking it with no signal, even
+// though the pipeline still pins it replaceOnChanges. A declared name the pipeline
+// does not pin, or a pipeline pin the declaration omits, is reported.
+func immutableInputsPipelineMismatch(inv standardsInventory) []string {
+	declared := namesSet(inv.Guarantees.ImmutableInputs)
+	pipeline := namesSet(immutableFieldPins())
+	var out []string
+	for name := range declared {
+		if !pipeline[name] {
+			out = append(out, fmt.Sprintf("%s declares immutable input %q which the pipeline (immutableFieldPins/mappings.yaml) does not pin", standardsInventoryPath, name))
+		}
+	}
+	for name := range pipeline {
+		if !declared[name] {
+			out = append(out, fmt.Sprintf("pipeline (immutableFieldPins/mappings.yaml) pins immutable input %q but %s does not declare it in guarantees.immutableInputs", name, standardsInventoryPath))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // propsToSet turns a type->props map into type->set-of-props.
 func propsToSet(m map[string][]string) map[string]map[string]bool {
 	out := make(map[string]map[string]bool, len(m))
@@ -262,6 +311,24 @@ func TestStandardsInventoryMatchesGolden(t *testing.T) {
 	// declaration cannot drift from what pass_secret_fields actually marks.
 	t.Run("SecretPropertiesMatchPipeline", func(t *testing.T) {
 		for _, v := range secretPropertiesPipelineMismatch(inv.Guarantees.SecretProperties, secretTypeProperties) {
+			t.Error(v)
+		}
+	})
+
+	// (2c) secretConfig BIJECTION against the pipeline source (configKeys), so
+	// deleting a guarantees.secretConfig entry cannot vacuously pass while the
+	// pipeline still marks the config secret.
+	t.Run("SecretConfigMatchesPipeline", func(t *testing.T) {
+		for _, v := range secretConfigPipelineMismatch(inv) {
+			t.Error(v)
+		}
+	})
+
+	// (2d) immutableInputs BIJECTION against the pipeline source
+	// (immutableFieldPins/mappings.yaml), so deleting a guarantees.immutableInputs
+	// entry cannot vacuously pass while the pipeline still pins it replaceOnChanges.
+	t.Run("ImmutableInputsMatchPipeline", func(t *testing.T) {
+		for _, v := range immutableInputsPipelineMismatch(inv) {
 			t.Error(v)
 		}
 	})

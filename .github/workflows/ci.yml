@@ -3,7 +3,11 @@ name: CI
 # The provider is generated from a pinned spec; the core risk is a spec/dep bump
 # silently changing output. These jobs are the safety net (Track A): the unit +
 # determinism gate, the SDK regeneration/import checks, and the Dockerized mock
-# tier. Mark `test`, `determinism`, and `sdk-smoke` as required status checks.
+# tier. Mark `test`, `determinism`, `sdk-smoke`, and `contract` (the hard
+# API-stability gate: byte golden + breaking-change delta) as required status
+# checks. `schema-contract` is ADVISORY ONLY (continue-on-error, semantic
+# classifier) and must NOT be a required check — the hard forcing function is the
+# `contract` job's delta step.
 on:
   push:
     branches: [main]
@@ -110,7 +114,13 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           base="$RUNNER_TEMP/base-schema.json"
-          if git show "origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/schema.json" > "$base" 2>/dev/null; then
+          ref="origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/schema.json"
+          # Distinguish "path absent on base" (legit first-introduction skip) from
+          # any OTHER git failure: `git cat-file -e` tests object existence only.
+          # If the object exists, a subsequent `git show` failure is a REAL error and
+          # aborts the step (bash -e) instead of being silently masked as a skip.
+          if git cat-file -e "$ref" 2>/dev/null; then
+            git show "$ref" > "$base"
             make schema-delta OLD_SCHEMA="$base"
           else
             echo "base branch has no committed schema.json (first introduction) — skipping delta gate"
@@ -142,12 +152,16 @@ jobs:
           base_dir="$RUNNER_TEMP/base"
           mkdir -p "$base_dir"
           # Extract the base schema.json AND metadata.json beside each other so
-          # schema-tools can normalize token names. Skip cleanly if the base lacks
-          # the schema (first introduction).
-          if ! git show "origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/schema.json" > "$base_dir/schema.json" 2>/dev/null; then
+          # schema-tools can normalize token names. Distinguish "path absent on base"
+          # (legit first-introduction skip, via `git cat-file -e`) from any other git
+          # failure: once the object is known to exist, a `git show` failure surfaces
+          # instead of being masked as a skip.
+          ref="origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/schema.json"
+          if ! git cat-file -e "$ref" 2>/dev/null; then
             echo "base branch has no committed schema.json (first introduction) — skipping advisory compare"
             exit 0
           fi
+          git show "$ref" > "$base_dir/schema.json"
           git show "origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/metadata.json" > "$base_dir/metadata.json" 2>/dev/null || true
           {
             echo "## schema-tools compare (advisory)"

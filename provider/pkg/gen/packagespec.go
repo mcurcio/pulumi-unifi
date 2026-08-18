@@ -1,6 +1,8 @@
 package gen
 
 import (
+	"sort"
+
 	pschema "github.com/pulumi/pulumi/pkg/v3/codegen/schema"
 )
 
@@ -56,6 +58,22 @@ var configKeys = map[string]configKey{
 		typ:         "boolean",
 		env:         []string{"UNIFI_ALLOW_INSECURE"},
 	},
+}
+
+// SecretConfigKeys returns the names of provider config keys the pipeline marks
+// secret (configKeys entries with secret:true), sorted. It is the read-only
+// accessor the contract test binds guarantees.secretConfig against, reading the
+// SAME configKeys map packageSpec() derives Config.Variables from — so there is no
+// second copy of the secret-config truth for the yaml to drift from.
+func SecretConfigKeys() []string {
+	var out []string
+	for name, k := range configKeys {
+		if k.secret {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // configVariables builds the Config.Variables view: description + type + secret,

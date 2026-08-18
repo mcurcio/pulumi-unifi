@@ -169,6 +169,33 @@ func detectBreakingDelta(base, cur pschema.PackageSpec) []breakingItem {
 		}
 	}
 
+	// Nested #/types object properties. A shared object type is referenced by $ref
+	// from resource/function properties, so removing, narrowing, un-securing, or
+	// adding replaceOnChanges to one of ITS properties never appears in any
+	// resource/function's OWN property map — the loops above are blind to it. Diff
+	// each non-enum object type present in BOTH base and cur with the SAME machinery
+	// (comparePropMaps) plus removed-property detection, keyed by <typeToken>.<prop>.
+	for tok, bct := range base.Types {
+		if len(bct.Enum) > 0 {
+			continue // enum value removal handled above
+		}
+		cct, ok := cur.Types[tok]
+		if !ok {
+			continue // token removal: caught by the byte golden / tokens.txt
+		}
+		if len(cct.Enum) > 0 {
+			continue // object -> enum reshape is a token-shape change, caught by the byte golden
+		}
+		// (b) removed property — an output of the shared object type disappears.
+		for name := range bct.Properties {
+			if _, present := cct.Properties[name]; !present {
+				items = append(items, breakingItem{"removed-output", tok + "." + name})
+			}
+		}
+		// (c/d/e) per-property flag & type changes on properties present in both.
+		items = append(items, comparePropMaps(base, cur, tok, bct.Properties, cct.Properties)...)
+	}
+
 	return items
 }
 
@@ -311,7 +338,10 @@ func unreleasedBreakingAck(t *testing.T) (bool, string) {
 			inUnreleased = strings.Contains(strings.ToLower(line), "unreleased")
 			inBreaking = false
 		case strings.HasPrefix(line, "### "):
-			inBreaking = inUnreleased && strings.Contains(strings.ToLower(line), "breaking")
+			// EXACT heading match (after the outer TrimSpace), case-insensitive on
+			// the word only. A substring test would let `### Non-Breaking` (or any
+			// other heading containing "breaking") satisfy the acknowledgement.
+			inBreaking = inUnreleased && strings.EqualFold(line, "### Breaking")
 		default:
 			if inUnreleased && inBreaking && isBullet(line) {
 				return true, path
