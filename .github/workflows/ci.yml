@@ -144,8 +144,25 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: provider/go.sum
-      - name: install schema-tools (pinned release)
-        run: go install github.com/pulumi/schema-tools@v0.8.1
+      - name: install schema-tools (pinned release binary)
+        # `go install github.com/pulumi/schema-tools@v0.8.1` fails: that module's
+        # go.mod carries `replace` directives, which `go install` refuses. Install
+        # the pinned prebuilt release binary instead (linux/amd64 runner) and put
+        # it on PATH for the compare step. `set -euo pipefail` makes any download
+        # or extract failure fail this step (the job stays continue-on-error, so a
+        # failure here still never blocks the PR).
+        run: |
+          set -euo pipefail
+          version="v0.8.1"
+          asset="schema-tools-${version}-linux-amd64.tar.gz"
+          url="https://github.com/pulumi/schema-tools/releases/download/${version}/${asset}"
+          dest="$RUNNER_TEMP/schema-tools"
+          mkdir -p "$dest"
+          curl -sSL --fail "$url" -o "$dest/${asset}"
+          tar -xzf "$dest/${asset}" -C "$dest" schema-tools
+          chmod +x "$dest/schema-tools"
+          "$dest/schema-tools" version
+          echo "$dest" >> "$GITHUB_PATH"
       - name: schema-tools compare against base (advisory)
         run: |
           new="provider/cmd/pulumi-resource-unifi/schema.json"
