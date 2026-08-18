@@ -3,7 +3,11 @@ name: CI
 # The provider is generated from a pinned spec; the core risk is a spec/dep bump
 # silently changing output. These jobs are the safety net (Track A): the unit +
 # determinism gate, the SDK regeneration/import checks, and the Dockerized mock
-# tier. Mark `test`, `determinism`, and `sdk-smoke` as required status checks.
+# tier. Mark `test`, `determinism`, `sdk-smoke`, and `contract` (the hard
+# API-stability gate: byte golden + breaking-change delta) as required status
+# checks. `schema-contract` is ADVISORY ONLY (continue-on-error, semantic
+# classifier) and must NOT be a required check — the hard forcing function is the
+# `contract` job's delta step.
 on:
   push:
     branches: [main]
@@ -83,6 +87,97 @@ jobs:
           python-version: "3.x"
       - name: make test-sdk
         run: make test-sdk
+
+  # Strong API-contract gate (required): the committed schema.json is the frozen
+  # public-API golden. Regenerate in-process from the pinned spec and assert
+  # byte-equality — an upstream churn that alters the surface without a reviewed
+  # `make schema` rebase turns this red. Runs over ./pkg/gen/ only (embeds just
+  # mappings.yaml): no Docker, Python, or Pulumi, and no cmd-package embeds.
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: provider/go.sum
+      - name: make schema-check
+        run: make schema-check
+      # Hard breaking-change delta gate (design §4.3). On a pull_request, extract
+      # the base-branch golden and require any token-invariant breaking change to
+      # be acknowledged in CHANGELOG.md. Skips cleanly when the base lacks the file
+      # (first introduction). On push events (no base_ref) the delta step is skipped
+      # entirely — there is no base branch to diff against.
+      - name: breaking-change delta gate (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          base="$RUNNER_TEMP/base-schema.json"
+          ref="origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/schema.json"
+          # Distinguish "path absent on base" (legit first-introduction skip) from
+          # any OTHER git failure: `git cat-file -e` tests object existence only.
+          # If the object exists, a subsequent `git show` failure is a REAL error and
+          # aborts the step (bash -e) instead of being silently masked as a skip.
+          if git cat-file -e "$ref" 2>/dev/null; then
+            git show "$ref" > "$base"
+            make schema-delta OLD_SCHEMA="$base"
+          else
+            echo "base branch has no committed schema.json (first introduction) — skipping delta gate"
+          fi
+
+  # Advisory semantic classifier (NOT a required check): pulumi's schema-tools
+  # categorizes the PR's schema.json against the base branch as additive/breaking
+  # to inform the version bump (design §3.3). It NEVER blocks merge
+  # (continue-on-error) — the hard forcing function is the `contract` job's delta
+  # step. PR-only, needs full history to `git show` the base golden. schema-tools
+  # is pinned to a released tag (v0.8.1).
+  schema-contract:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: provider/go.sum
+      - name: install schema-tools (pinned release)
+        run: go install github.com/pulumi/schema-tools@v0.8.1
+      - name: schema-tools compare against base (advisory)
+        run: |
+          new="provider/cmd/pulumi-resource-unifi/schema.json"
+          base_dir="$RUNNER_TEMP/base"
+          mkdir -p "$base_dir"
+          # Extract the base schema.json AND metadata.json beside each other so
+          # schema-tools can normalize token names. Distinguish "path absent on base"
+          # (legit first-introduction skip, via `git cat-file -e`) from any other git
+          # failure: once the object is known to exist, a `git show` failure surfaces
+          # instead of being masked as a skip.
+          ref="origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/schema.json"
+          if ! git cat-file -e "$ref" 2>/dev/null; then
+            echo "base branch has no committed schema.json (first introduction) — skipping advisory compare"
+            exit 0
+          fi
+          git show "$ref" > "$base_dir/schema.json"
+          git show "origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/metadata.json" > "$base_dir/metadata.json" 2>/dev/null || true
+          {
+            echo "## schema-tools compare (advisory)"
+            echo ""
+            echo "This category is advisory only. Version-bump correctness is convention-tier"
+            echo "(see docs/api-standards.md §4 Version policy). A **breaking** change must be"
+            echo "acknowledged with a non-empty \`### Breaking\` bullet under \`## [Unreleased]\`"
+            echo "in CHANGELOG.md, or the required \`contract\` job fails (make schema-delta)."
+            echo ""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          schema-tools compare -p unifi --old-path "$base_dir/schema.json" --new-path "$new" --summary | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # The machine-readable form is emitted for anyone consuming the run log;
+          # it is informational only and never affects the job's status.
+          schema-tools compare -p unifi --old-path "$base_dir/schema.json" --new-path "$new" --json || true
 
   # Tier-1 mock tier (Docker): read + write dispatch through the real provider over
   # TLS against the Prism mock. Separate job because it needs Docker.

@@ -75,11 +75,23 @@ It's the prerequisite for migrating the `unifi/` Terraform stack in the separate
 Pulumi. Consuming the generated SDK from `iac` is a **future, separate effort** — out of scope for
 this repo, which only produces the provider + SDK.
 
+## API stability
+
+The provider's public surface (the Pulumi package `schema.json`) is **frozen
+byte-for-byte** and owned by this repo, so an upstream spec bump cannot change the
+public API without turning a required check red. The naming/shape/secret/immutable
+rules, the enforced-vs-convention split, and the version & deprecation policy are
+documented in **[docs/api-standards.md](docs/api-standards.md)** (machine-checked
+against the golden via `docs/api-standards.yaml`). To move the surface
+deliberately, run `make schema`, review the diff, and commit. See
+[docs/design/api-contract.md](docs/design/api-contract.md) for the design.
+
 ## Repo layout
 
 ```
 README.md
 docs/
+  api-standards.md # API naming/shape/stability contract (machine-checked via api-standards.yaml)
   DESIGN.md        # technical design: toolchain, pipeline, grouping, auth, distribution
   BUILD-PLAN.md    # phased build sequence + verification checklist
 openapi/           # pin manifest (SOURCE + fetch.sh); the spec itself is fetched at build (gitignored)

@@ -1,0 +1,45 @@
+# Machine-checked contract inventory. Parsed by provider/pkg/gen/standards_test.go
+# and provider/pkg/gen/contract_lint_test.go. This file is the SINGLE DECLARED
+# SOURCE for the module set and the secret/immutable guarantee lists: both the
+# convention linter (TestContractLint) and the doc-truth bijection
+# (TestStandardsInventoryMatchesGolden) read their expected sets from here.
+#
+# It carries RULES + the module set + the secret/immutable CLAIM lists, NOT a
+# per-token census — the census is the frozen schema.json golden itself, projected
+# to provider/pkg/gen/testdata/tokens.txt. See docs/design/api-contract.md §3.6 /
+# §4.3 / §7.
+version: 1
+
+# The closed set of <module>/<version> segments the public surface is allowed to
+# use. A new module appearing in the golden without being listed here fails
+# TestContractLint/ModuleVersionAllowed; a module listed here that no golden token
+# uses (a dead declaration) fails TestStandardsInventoryMatchesGolden's bijection.
+# A new module is a deliberate, reviewed event.
+modules:
+  - sites/v1
+  - dpi/v1
+  - countries/v1
+  - info/v1
+  - pending-devices/v1
+
+tokenGrammar: "unifi:<module>/<version>:<PascalCase>"
+
+guarantees:
+  # Every resource that HAS an input of this name must mark it replaceOnChanges in
+  # the golden (identity fields whose change forces a replace, not an in-place
+  # edit). Mirrors pass_replace_on_changes.go's immutableFields pins (mappings.yaml).
+  immutableInputs:
+    - siteId
+    - vlanId
+  # Every named config variable must be secret:true in the golden config.
+  # Security-relevant. Mirrors packagespec.go configKeys (apiKey secret:true).
+  secretConfig:
+    - apiKey
+  # Every listed type-property must be secret:true on that #/types entry in the
+  # golden. Keyed by type token; cross-checked against
+  # pass_secret_fields.go's secretTypeProperties so the shipped flag, the pipeline
+  # source, and this declaration all agree. Security-relevant; realizes the
+  # TYPE-level secret the config-only checks missed.
+  secretProperties:
+    "unifi:sites/v1:HotspotVoucherDetails":
+      - code

@@ -22,7 +22,7 @@ BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: ensure fetch gen generate_schema python_sdk generate build install test test-mock test-sdk e2e-bootstrap test-e2e clean
+.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e clean
 
 MOCK_COMPOSE := test/mock/docker-compose.yml
 # The Tier-2 live-e2e pipeline — project name, compose file, seed, volume, ports,
@@ -57,6 +57,47 @@ python_sdk:: generate_schema
 
 # Deterministic umbrella: fetch + regenerate every build artifact from the pinned spec.
 generate:: python_sdk
+
+# Deliberate REBASE of the owned contract goldens. Regenerates schema.json +
+# metadata.json from the pinned spec (via generate_schema, the entrypoint writer)
+# and rebases the tokens.txt projection. This is the ONLY sanctioned way to move
+# the public surface; review the resulting git diff before committing. (Does NOT
+# touch reference.md — that artifact is not part of the contract.)
+schema:: generate_schema
+	cd provider && UPDATE_GOLDEN=1 go test -count=1 -run TestTokenSetMatchesGolden ./pkg/gen/
+	@echo "schema goldens rebased — review the git diff before committing"
+
+# HARD read-only contract gate: byte-goldens (schema + metadata) + token set +
+# convention linter + docs-truth bijection (docs/api-standards.yaml <-> golden).
+# Regenerates the surface IN-PROCESS and asserts it equals the committed goldens;
+# never mutates committed files. Runs over ./pkg/gen/ ONLY (it embeds just
+# mappings.yaml, so it compiles without the cmd package's gitignored embeds).
+# Fails on any drift.
+schema-check:: $(SPEC)
+	cd provider && go test -count=1 -run 'TestSchemaMatchesGolden|TestMetadataMatchesGolden|TestTokenSetMatchesGolden|TestContractLint|TestStandardsInventoryMatchesGolden' ./pkg/gen/
+
+# HARD breaking-change delta gate (CI supplies the base golden via `git show`).
+# Detects the token-invariant breaking classes (design §4.1 ★) between the
+# base-branch golden ($(OLD_SCHEMA)) and the committed golden, and FAILS unless
+# CHANGELOG.md's `## [Unreleased]` / `### Breaking` section acknowledges them
+# (§4.3). Skips cleanly when CONTRACT_BASE_SCHEMA is unset (local dev) or the base
+# lacks the file (first introduction). Runs over ./pkg/gen/ only — no cmd embeds.
+schema-delta::
+	cd provider && CONTRACT_BASE_SCHEMA=$(OLD_SCHEMA) go test -count=1 -run TestNoUnacknowledgedBreakingDelta ./pkg/gen/
+
+# ADVISORY semantic classification (never fails the build). Categorizes the
+# committed golden against a base schema via pulumi's schema-tools, emitting the
+# additive/breaking summary that informs the version bump (design §3.3). OLD_SCHEMA
+# is a git-extracted base copy (see the schema-contract CI job). Requires
+# schema-tools on PATH (`go install github.com/pulumi/schema-tools@v0.8.1`).
+schema-compare::
+	schema-tools compare -p unifi --old-path $(OLD_SCHEMA) --new-path $(SCHEMA_FILE) --summary
+
+# HARD convention-linter gate (subset of schema-check). Loads the COMMITTED
+# schema.json golden and asserts the naming/shape/secret/immutable invariants
+# (design §3.4). Kept as a named target for local use; reads only ./pkg/gen/.
+lint-schema::
+	cd provider && go test -count=1 -run 'TestContractLint' ./pkg/gen/
 
 # Build the provider plugin binary. Depends on generate_schema so the //go:embed
 # inputs (schema.json/metadata.json/openapi_generated.yml) exist at compile time.
