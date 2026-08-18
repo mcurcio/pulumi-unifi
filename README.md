@@ -6,6 +6,13 @@ A **code-generated Pulumi provider** for Ubiquiti's official **UniFi Network Int
 > **Status: read + write paths complete; Phase 4 proven at Tier-1.** See **Project scope** below for
 > what exists today vs. what's in development. Full sequence in [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md).
 
+## Documentation
+
+Full docs are published at **<https://mcurcio.github.io/pulumi-unifi/>** (MkDocs
+Material, versioned with `mike` — the `latest` alias tracks the newest stable
+release). The site covers installation, authentication, a getting-started
+example, and an auto-generated API reference. Build it locally with `make docs`.
+
 ## What this is
 
 The provider is generated from the OpenAPI 3.1 specs published by

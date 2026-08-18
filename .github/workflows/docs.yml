@@ -1,0 +1,71 @@
+name: Docs
+
+# Publishes the versioned documentation site (MkDocs Material + mike) to the
+# gh-pages branch. Triggers on release tags, and on manual dispatch so docs can
+# be published before the first real release (dispatch deploys under a `dev`
+# label). The narrative pages are hand-written; the API reference page is
+# regenerated from the provider schema on every run (a disposable stopgap).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# mike pushes to the gh-pages branch.
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history + gh-pages so mike can rebase its version index. Docs never
+      # need the 175MB LFS e2e seed, so skip LFS entirely.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: false
+      - name: fetch gh-pages for mike
+        run: git fetch origin gh-pages --depth=1 || true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: provider/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: build provider (regenerates schema.json)
+        run: make build
+
+      - name: generate the disposable API reference
+        run: python3 docs/gen_reference.py --schema provider/cmd/pulumi-resource-unifi/schema.json --out docs/site/reference.md
+
+      - name: install docs tooling
+        run: pip install mkdocs-material mike
+
+      - name: configure git author for mike
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: deploy with mike
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            # Tagged release: publish the version, move the public `latest`
+            # alias onto it, and make it the site default.
+            mike deploy --push --update-aliases "${GITHUB_REF_NAME}" latest
+            mike set-default --push latest
+          else
+            # Manual dispatch: publish only the `dev` preview. Never touch the
+            # `latest` alias or the site default so a preview cannot hijack the
+            # public release once a real tag exists.
+            mike deploy --push dev
+          fi

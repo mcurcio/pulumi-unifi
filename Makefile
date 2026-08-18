@@ -22,7 +22,9 @@ BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e clean
+.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
+
+DOCSVENV     := $(WORKING_DIR)/.docsvenv
 
 MOCK_COMPOSE := test/mock/docker-compose.yml
 # The Tier-2 live-e2e pipeline — project name, compose file, seed, volume, ports,
@@ -166,5 +168,31 @@ e2e-bootstrap::
 test-e2e:: build
 	./test/e2e/run.sh
 
+# --- Documentation (MkDocs Material + mike) ---------------------------------
+# The docs are fully isolated from the Go build and the SDK venv: an auto-
+# generated, disposable API reference (docs/gen_reference.py, stdlib-only, no
+# pulumi imports) plus hand-written narrative pages, rendered by MkDocs Material.
+# All docs tooling lives in its own throwaway venv (.docsvenv), mirroring the
+# .sdkvenv pattern, so it never touches the provider build.
+
+# Regenerate the disposable API reference page from the freshly built schema.
+docs-gen:: build
+	python3 docs/gen_reference.py --schema $(SCHEMA_FILE) --out docs/site/reference.md
+
+# Build the static site into site/ (gitignored) with --strict (warnings fail).
+# Provisions the isolated docs venv on demand.
+docs:: docs-gen
+	python3 -m venv $(DOCSVENV)
+	$(DOCSVENV)/bin/pip install -q --upgrade pip
+	$(DOCSVENV)/bin/pip install -q mkdocs-material mike
+	$(DOCSVENV)/bin/mkdocs build --strict
+
+# Local preview (regenerates the reference first). Ctrl-C to stop.
+docs-serve:: docs-gen
+	python3 -m venv $(DOCSVENV)
+	$(DOCSVENV)/bin/pip install -q --upgrade pip
+	$(DOCSVENV)/bin/pip install -q mkdocs-material mike
+	$(DOCSVENV)/bin/mkdocs serve
+
 clean::
-	rm -rf $(BIN) $(WORKING_DIR)/.sdkvenv
+	rm -rf $(BIN) $(WORKING_DIR)/.sdkvenv $(DOCSVENV) $(WORKING_DIR)/site docs/site/reference.md
