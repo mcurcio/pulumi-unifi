@@ -152,6 +152,11 @@ jobs:
           {
             echo "## schema-tools compare (advisory)"
             echo ""
+            echo "This category is advisory only. Version-bump correctness is convention-tier"
+            echo "(see docs/api-standards.md §4 Version policy). A **breaking** change must be"
+            echo "acknowledged with a non-empty \`### Breaking\` bullet under \`## [Unreleased]\`"
+            echo "in CHANGELOG.md, or the required \`contract\` job fails (make schema-delta)."
+            echo ""
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           schema-tools compare -p unifi --old-path "$base_dir/schema.json" --new-path "$new" --summary | tee -a "$GITHUB_STEP_SUMMARY"

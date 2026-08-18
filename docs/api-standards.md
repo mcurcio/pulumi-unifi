@@ -120,6 +120,40 @@ fails. This converts "a breaking change merges unseen" into "a breaking change i
 impossible without the author writing a breaking-changelog line." The
 acknowledgement is *presence*-granular, not per-change; tightening is deferred.
 
+### Version policy
+
+Version-bump correctness is **convention-tier**, stated as such: no gate verifies
+that the number a maintainer picks matches the classification. What *is* enforced
+is the **acknowledgement** of a breaking change (above); the mapping to a specific
+version number is documented policy a human follows.
+
+- **Pre-1.0 (current, `0.x`).** The surface is unstable by SemVer convention, but
+  the contract still applies mechanically: a **breaking** delta bumps the **minor**
+  (`0.Y.0`); **additive and cosmetic** deltas bump the **patch** (`0.0.Z`).
+  **Explicit, intended consequence:** pre-1.0 a brand-new resource ships as a
+  **patch**, because additive and cosmetic share the patch slot. This is accepted —
+  pre-1.0 the additive-vs-cosmetic distinction carries no SemVer promise; only the
+  breaking/non-breaking boundary is load-bearing, and it maps to the minor.
+- **Post-1.0.** Strict SemVer: breaking → **major**, additive → **minor**,
+  cosmetic → **patch**, mapped from the taxonomy above.
+- **Spec bumps are not automatically releases.** Bumping `openapi/pin.env` in a way
+  that changes the surface produces a golden diff → a reviewed `make schema` commit
+  → the classifier + delta-diagnostic decide whether an acknowledgement is required.
+  An upstream bump with no surface delta is a patch (or no release).
+
+Only the breaking **acknowledgement** is gated (by `TestNoUnacknowledgedBreakingDelta`,
+above); the version *number* itself is not gated today. A release-time gate — failing
+a release whose bump is smaller than the accumulated `### Breaking` changelog entries
+demand — is a worthwhile **deferred** enhancement, recorded here so the gap is visible
+rather than dressed up as a guarantee.
+
+### Deprecation
+
+A token or property slated for removal is first marked with a `deprecationMessage`
+for **at least one minor release** before it is removed, so consumers get a
+migration window. Enforcement of the window (a "no removal of a non-deprecated
+token" linter) needs a prior-release schema reference and is **deferred**.
+
 ## 5. How the contract is enforced
 
 | Gate | Target | Type |
