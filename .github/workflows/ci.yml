@@ -101,6 +101,20 @@ jobs:
           cache-dependency-path: provider/go.sum
       - name: make schema-check
         run: make schema-check
+      # Hard breaking-change delta gate (design §4.3). On a pull_request, extract
+      # the base-branch golden and require any token-invariant breaking change to
+      # be acknowledged in CHANGELOG.md. Skips cleanly when the base lacks the file
+      # (first introduction). On push events (no base_ref) the delta step is skipped
+      # entirely — there is no base branch to diff against.
+      - name: breaking-change delta gate (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          base="$RUNNER_TEMP/base-schema.json"
+          if git show "origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/schema.json" > "$base" 2>/dev/null; then
+            make schema-delta OLD_SCHEMA="$base"
+          else
+            echo "base branch has no committed schema.json (first introduction) — skipping delta gate"
+          fi
 
   # Tier-1 mock tier (Docker): read + write dispatch through the real provider over
   # TLS against the Prism mock. Separate job because it needs Docker.

@@ -22,7 +22,7 @@ BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e clean
+.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e clean
 
 MOCK_COMPOSE := test/mock/docker-compose.yml
 # The Tier-2 live-e2e pipeline — project name, compose file, seed, volume, ports,
@@ -73,6 +73,15 @@ schema:: generate_schema
 # package's gitignored embeds). Fails on any drift.
 schema-check:: $(SPEC)
 	cd provider && go test -count=1 -run 'TestSchemaMatchesGolden|TestMetadataMatchesGolden|TestTokenSetMatchesGolden|TestContractLint' ./pkg/gen/
+
+# HARD breaking-change delta gate (CI supplies the base golden via `git show`).
+# Detects the token-invariant breaking classes (design §4.1 ★) between the
+# base-branch golden ($(OLD_SCHEMA)) and the committed golden, and FAILS unless
+# CHANGELOG.md's `## [Unreleased]` / `### Breaking` section acknowledges them
+# (§4.3). Skips cleanly when CONTRACT_BASE_SCHEMA is unset (local dev) or the base
+# lacks the file (first introduction). Runs over ./pkg/gen/ only — no cmd embeds.
+schema-delta::
+	cd provider && CONTRACT_BASE_SCHEMA=$(OLD_SCHEMA) go test -count=1 -run TestNoUnacknowledgedBreakingDelta ./pkg/gen/
 
 # HARD convention-linter gate (subset of schema-check). Loads the COMMITTED
 # schema.json golden and asserts the naming/shape/secret/immutable invariants
