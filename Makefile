@@ -67,12 +67,14 @@ schema:: generate_schema
 	cd provider && UPDATE_GOLDEN=1 go test -count=1 -run TestTokenSetMatchesGolden ./pkg/gen/
 	@echo "schema goldens rebased — review the git diff before committing"
 
-# HARD read-only contract gate. Regenerates the surface IN-PROCESS and asserts it
-# equals the committed goldens; never mutates committed files. Runs over
-# ./pkg/gen/ ONLY (it embeds just mappings.yaml, so it compiles without the cmd
-# package's gitignored embeds). Fails on any drift.
+# HARD read-only contract gate: byte-goldens (schema + metadata) + token set +
+# convention linter + docs-truth bijection (docs/api-standards.yaml <-> golden).
+# Regenerates the surface IN-PROCESS and asserts it equals the committed goldens;
+# never mutates committed files. Runs over ./pkg/gen/ ONLY (it embeds just
+# mappings.yaml, so it compiles without the cmd package's gitignored embeds).
+# Fails on any drift.
 schema-check:: $(SPEC)
-	cd provider && go test -count=1 -run 'TestSchemaMatchesGolden|TestMetadataMatchesGolden|TestTokenSetMatchesGolden|TestContractLint' ./pkg/gen/
+	cd provider && go test -count=1 -run 'TestSchemaMatchesGolden|TestMetadataMatchesGolden|TestTokenSetMatchesGolden|TestContractLint|TestStandardsInventoryMatchesGolden' ./pkg/gen/
 
 # HARD breaking-change delta gate (CI supplies the base golden via `git show`).
 # Detects the token-invariant breaking classes (design §4.1 ★) between the

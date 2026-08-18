@@ -30,19 +30,11 @@ func loadGoldenSchema(t *testing.T) pschema.PackageSpec {
 	return pkg
 }
 
-// allowedModules is the closed set of <module>/<version> segments the public
-// surface is allowed to use. It is hard-coded here (single source) ON PURPOSE
-// for this bead: bead E will move it to docs/api-standards.yaml and bead F will
-// bind it to the golden via a module bijection. Until then, the value of this
-// check is that a NEW module appearing in the golden without an update here
-// fails — a new module is a deliberate, reviewed event.
-var allowedModules = map[string]bool{
-	"sites/v1":           true,
-	"dpi/v1":             true,
-	"countries/v1":       true,
-	"info/v1":            true,
-	"pending-devices/v1": true,
-}
+// The allowed module set and the secret/immutable guarantee lists are NOT
+// hard-coded here: they are declared once in docs/api-standards.yaml (the single
+// declared source) and loaded via loadStandardsInventory (standards_test.go).
+// Both this linter and the doc-truth bijection read the SAME inventory, so there
+// is one declared source consumed by both.
 
 // resourceTokenRe is the frozen resource token grammar (design §3.4):
 // unifi:<module>/<version>:<PascalCase>.
@@ -82,6 +74,10 @@ func tokenModuleVersion(tok string) string {
 // TestExcludedPathsResolve, ambiguous item path, TestNoDuplicateShortTokenNames).
 func TestContractLint(t *testing.T) {
 	pkg := loadGoldenSchema(t)
+	// The module set and the secret/immutable claim lists are read from the single
+	// declared source (docs/api-standards.yaml), so the linter and the bijection
+	// cannot disagree about what the surface is allowed to be.
+	inv := loadStandardsInventory(t)
 
 	// 1. TokenGrammar — resources are PascalCase, functions are get/list<Pascal>.
 	t.Run("TokenGrammar", func(t *testing.T) {
@@ -100,8 +96,10 @@ func TestContractLint(t *testing.T) {
 		}
 	})
 
-	// 2. ModuleVersionAllowed — every token's <module>/<version> is in the set.
+	// 2. ModuleVersionAllowed — every token's <module>/<version> is in the set
+	// declared by docs/api-standards.yaml.
 	t.Run("ModuleVersionAllowed", func(t *testing.T) {
+		allowedModules := inv.moduleSet()
 		check := func(kind, tok string) {
 			mv := tokenModuleVersion(tok)
 			if mv == "" {
@@ -109,7 +107,7 @@ func TestContractLint(t *testing.T) {
 				return
 			}
 			if !allowedModules[mv] {
-				t.Errorf("%s token %q uses module %q not in the allowed set (a new module must be reviewed; add it to allowedModules)", kind, tok, mv)
+				t.Errorf("%s token %q uses module %q not in the allowed set (a new module must be reviewed; add it to docs/api-standards.yaml modules:)", kind, tok, mv)
 			}
 		}
 		for tok := range pkg.Resources {
@@ -149,62 +147,33 @@ func TestContractLint(t *testing.T) {
 		}
 	})
 
-	// 4. SecretConfig — every config the project guarantees secret is secret:true,
-	// and no known-secret config is left unflagged.
+	// 4. SecretConfig — every config declared secret in api-standards.yaml is
+	// secret:true in the golden config. Delegates to the shared predicate so the
+	// linter and the bijection assert the identical thing.
 	t.Run("SecretConfig", func(t *testing.T) {
-		for _, name := range knownSecretConfig {
-			cfg, ok := pkg.Config.Variables[name]
-			if !ok {
-				t.Errorf("known-secret config %q is missing from the golden config", name)
-				continue
-			}
-			if !cfg.Secret {
-				t.Errorf("config %q must be secret:true in the golden (security regression if unflagged)", name)
-			}
+		for _, v := range secretConfigViolations(pkg, inv.Guarantees.SecretConfig) {
+			t.Error(v)
 		}
 	})
 
-	// 5. SecretTypeProperties — every type-level secret the pipeline sets
-	// (secretTypeProperties in pass_secret_fields.go, e.g.
-	// unifi:sites/v1:HotspotVoucherDetails.code) is secret:true on that #/types
-	// entry in the shipped golden. Referencing the pipeline source directly makes
-	// the shipped flag, the pipeline source, and this check agree by construction.
+	// 5. SecretTypeProperties — every type-level secret declared in
+	// api-standards.yaml (e.g. unifi:sites/v1:HotspotVoucherDetails.code) is
+	// secret:true on that #/types entry in the shipped golden. The bijection
+	// additionally cross-checks the declaration against the pipeline source
+	// (pass_secret_fields.secretTypeProperties); here we assert it is realized on
+	// the artifact we ship.
 	t.Run("SecretTypeProperties", func(t *testing.T) {
-		for typeTok, props := range secretTypeProperties {
-			ct, ok := pkg.Types[typeTok]
-			if !ok {
-				t.Errorf("secret type %q not present in golden #/types", typeTok)
-				continue
-			}
-			for _, prop := range props {
-				ps, ok := ct.Properties[prop]
-				if !ok {
-					t.Errorf("secret property %q missing on golden type %q", prop, typeTok)
-					continue
-				}
-				if !ps.Secret {
-					t.Errorf("property %q on type %q must be secret:true in the golden (leaks a credential otherwise)", prop, typeTok)
-				}
-			}
+		for _, v := range secretTypePropertyViolations(pkg, inv.Guarantees.SecretProperties) {
+			t.Error(v)
 		}
 	})
 
-	// 6. ImmutableInputs — every input the project pins immutable
-	// (immutableFieldPins in mappings, e.g. siteId, vlanId) is replaceOnChanges on
-	// EVERY resource that carries it. Reuses the pipeline's pin source so the two
-	// cannot drift.
+	// 6. ImmutableInputs — every input declared immutable in api-standards.yaml
+	// (siteId, vlanId) is replaceOnChanges on EVERY resource that carries it.
+	// Delegates to the shared predicate.
 	t.Run("ImmutableInputs", func(t *testing.T) {
-		pins := immutableFieldPins()
-		for _, name := range pins {
-			for tok, res := range pkg.Resources {
-				ps, has := res.InputProperties[name]
-				if !has {
-					continue
-				}
-				if !ps.ReplaceOnChanges {
-					t.Errorf("immutable input %q on resource %q must be replaceOnChanges (in-place update would be rejected/dropped)", name, tok)
-				}
-			}
+		for _, v := range immutableInputViolations(pkg, inv.Guarantees.ImmutableInputs) {
+			t.Error(v)
 		}
 	})
 
@@ -252,9 +221,3 @@ func TestContractLint(t *testing.T) {
 		}
 	})
 }
-
-// knownSecretConfig names the config variables the project guarantees are secret.
-// Hard-coded here (single source) for this bead; bead E moves it to
-// docs/api-standards.yaml and bead F binds it. Mirrors the config-level secret
-// declared in packagespec.go (apiKey).
-var knownSecretConfig = []string{"apiKey"}
