@@ -22,7 +22,7 @@ BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e clean
+.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e clean
 
 MOCK_COMPOSE := test/mock/docker-compose.yml
 # The Tier-2 live-e2e pipeline — project name, compose file, seed, volume, ports,
@@ -82,6 +82,14 @@ schema-check:: $(SPEC)
 # lacks the file (first introduction). Runs over ./pkg/gen/ only — no cmd embeds.
 schema-delta::
 	cd provider && CONTRACT_BASE_SCHEMA=$(OLD_SCHEMA) go test -count=1 -run TestNoUnacknowledgedBreakingDelta ./pkg/gen/
+
+# ADVISORY semantic classification (never fails the build). Categorizes the
+# committed golden against a base schema via pulumi's schema-tools, emitting the
+# additive/breaking summary that informs the version bump (design §3.3). OLD_SCHEMA
+# is a git-extracted base copy (see the schema-contract CI job). Requires
+# schema-tools on PATH (`go install github.com/pulumi/schema-tools@v0.8.1`).
+schema-compare::
+	schema-tools compare -p unifi --old-path $(OLD_SCHEMA) --new-path $(SCHEMA_FILE) --summary
 
 # HARD convention-linter gate (subset of schema-check). Loads the COMMITTED
 # schema.json golden and asserts the naming/shape/secret/immutable invariants

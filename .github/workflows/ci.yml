@@ -116,6 +116,50 @@ jobs:
             echo "base branch has no committed schema.json (first introduction) — skipping delta gate"
           fi
 
+  # Advisory semantic classifier (NOT a required check): pulumi's schema-tools
+  # categorizes the PR's schema.json against the base branch as additive/breaking
+  # to inform the version bump (design §3.3). It NEVER blocks merge
+  # (continue-on-error) — the hard forcing function is the `contract` job's delta
+  # step. PR-only, needs full history to `git show` the base golden. schema-tools
+  # is pinned to a released tag (v0.8.1).
+  schema-contract:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: provider/go.sum
+      - name: install schema-tools (pinned release)
+        run: go install github.com/pulumi/schema-tools@v0.8.1
+      - name: schema-tools compare against base (advisory)
+        run: |
+          new="provider/cmd/pulumi-resource-unifi/schema.json"
+          base_dir="$RUNNER_TEMP/base"
+          mkdir -p "$base_dir"
+          # Extract the base schema.json AND metadata.json beside each other so
+          # schema-tools can normalize token names. Skip cleanly if the base lacks
+          # the schema (first introduction).
+          if ! git show "origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/schema.json" > "$base_dir/schema.json" 2>/dev/null; then
+            echo "base branch has no committed schema.json (first introduction) — skipping advisory compare"
+            exit 0
+          fi
+          git show "origin/${{ github.base_ref }}:provider/cmd/pulumi-resource-unifi/metadata.json" > "$base_dir/metadata.json" 2>/dev/null || true
+          {
+            echo "## schema-tools compare (advisory)"
+            echo ""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          schema-tools compare -p unifi --old-path "$base_dir/schema.json" --new-path "$new" --summary | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # The machine-readable form is emitted for anyone consuming the run log;
+          # it is informational only and never affects the job's status.
+          schema-tools compare -p unifi --old-path "$base_dir/schema.json" --new-path "$new" --json || true
+
   # Tier-1 mock tier (Docker): read + write dispatch through the real provider over
   # TLS against the Prism mock. Separate job because it needs Docker.
   test-mock:
