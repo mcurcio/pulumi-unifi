@@ -60,7 +60,15 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: provider/go.sum
+      # Pin the CLI to provider/go.mod's pulumi/pkg/v3 (one source of truth, read
+      # through the Makefile). Unpinned, it floated to v3.278.0, whose gen-sdk
+      # rejects the schema's digit-only property names.
+      - name: read pinned Pulumi CLI version
+        id: pulumi
+        run: echo "version=$(make -s pulumi-version)" >> "$GITHUB_OUTPUT"
       - uses: pulumi/actions@v6
+        with:
+          pulumi-version: ${{ steps.pulumi.outputs.version }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
@@ -81,7 +89,15 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: provider/go.sum
+      # Pin the CLI to provider/go.mod's pulumi/pkg/v3 (one source of truth, read
+      # through the Makefile). Unpinned, it floated to v3.278.0, whose gen-sdk
+      # rejects the schema's digit-only property names.
+      - name: read pinned Pulumi CLI version
+        id: pulumi
+        run: echo "version=$(make -s pulumi-version)" >> "$GITHUB_OUTPUT"
       - uses: pulumi/actions@v6
+        with:
+          pulumi-version: ${{ steps.pulumi.outputs.version }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
