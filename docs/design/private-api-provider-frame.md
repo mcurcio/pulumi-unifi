@@ -1,7 +1,7 @@
 # One UniFi Pulumi provider over two APIs: the frame
 
 **Status:** agreed frame (revision 4); all four owner questions answered 2026-11-26. **Where am I:** **Domain → System** (frame) → Service (skipped: one plugin) → Module (next gate) → Interfaces → Implementation.
-**Next:** the module-layer gate.
+**Next:** model-source discovery (§4, before the tracer), then the module-layer gate.
 
 **What changed since your last look:** stored ids name their API, so a move is safe without a refresh; a move needs every field to behave the same on both APIs; Q4 asks whether "gaps" means kinds or fields; the day-one official count is stated.
 
@@ -152,13 +152,23 @@ Your answer sets the `serving` choice: per kind or per field.
 
 **Downstream switch path:** the package is `pulumi_unifi`, the bridged SDK's own name, so the swap is one change. Tokens change (from `unifi:index/client:Client`), so state is re-imported by natural key: about 200 objects, one file, no ids.
 
+**Discovery first: where the private model comes from** (owner, 2026-11-26: "The most important discovery item: can we reliably get/build a model of the internal API? Ideally we could extract/scrape it from the official build that UniFi publishes, since that gives us a versioned target to test against").
+
+| Source (official, versioned) | Gives | Status |
+|---|---|---|
+| UniFi OS Server installer (`fw-update.ubnt.com`, product `unifi-os-server`; 5.1.15 = Network 10.4.57, 875 MB) | `api/fields/*.json` inside the Network jar, **and** a runnable UniFi OS (the only kind that serves the Integration API) | preferred; probe pending (layout, Docker run, v2 routes) |
+| Network app `.deb` (`dl.ui.com/unifi/<v>/unifi_sysvinit_all.deb`; 10.4.57 = 130 MB) | `api/fields/*.json` only (go-unifi's source; it pins 10.6.109) | fallback |
+| Neither | the newer kinds (go-unifi hand-writes 9) and the 12 v2 kinds | gap; the probe looks for routes in the jar and web UI |
+
+Findings land in `docs/research/private-api-model-source.md`. Ubiquiti's files are never committed.
+
 **Tracer:** against the test image.
 - **Client** (private): a key writes; override and fixed IP created, set off and dropped all round-trip; a name-only update keeps the override; a controller-UI edit shows drift only on managed fields; import by MAC with `properties` plans nothing.
 - **Network on both APIs** (test-only flip, fields both carry): created privately and flipped to official; then `up` **without refresh** re-resolves it, with no replace and nothing dropped from state; refresh stores the new id with no diff; then update, rename and drop a field through the official API.
 - **Checks:** do the two APIs' ids match; the site's `internalReference`; per API, does an update merge or replace, and does an official PUT reset fields it does not carry (Q4); are re-sent stored values rejected; two stacks adopting one object; deleting the built-in default network.
 - **Non-goals:** secrets, v2 kinds, release, the switch.
 
-**Outline:** (1) tracer; (2) engine: secrets, deletability, hooks; (3) coverage and the readiness report; (4) official bindings for ready kinds, retiring the pulschema runtime; (5) contract rebase, semantic-release.
+**Outline:** (0) model-source discovery; (1) tracer; (2) engine: secrets, deletability, hooks; (3) coverage and the readiness report; (4) official bindings for ready kinds, retiring the pulschema runtime; (5) contract rebase, semantic-release.
 
 ---
-History: 2026-11-25 draft, revision 2; 2026-11-26 revision 3 (owner's answers: one provider over two APIs), revision 4 (named ids, same-facts readiness, Q4); Q4 answered A.
+History: 2026-11-25 draft, revision 2; 2026-11-26 revision 3 (owner's answers: one provider over two APIs), revision 4 (named ids, same-facts readiness, Q4); Q4 answered A; model-source discovery added as step 0.
