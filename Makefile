@@ -20,9 +20,15 @@ GEN_DIR      := provider/cmd/pulumi-resource-$(PACK)
 SCHEMA_FILE  := $(GEN_DIR)/schema.json
 BIN          := $(WORKING_DIR)/bin
 
+# Single source of truth for the Pulumi CLI version: the pulumi/pkg/v3 codegen
+# library pinned in provider/go.mod. `pulumi package gen-sdk` output (and whether
+# it accepts our schema at all) depends on the CLI version, so python_sdk refuses
+# any other CLI, and CI installs exactly this version via `make pulumi-version`.
+PULUMI_VERSION := $(shell awk '$$1 == "github.com/pulumi/pulumi/pkg/v3" { sub(/^v/, "", $$2); print $$2 }' provider/go.mod)
+
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
+.PHONY: ensure pulumi-version check-pulumi fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
 
 DOCSVENV     := $(WORKING_DIR)/.docsvenv
 
@@ -34,6 +40,17 @@ MOCK_COMPOSE := test/mock/docker-compose.yml
 # Resolve and tidy Go module dependencies.
 ensure::
 	cd provider && go mod tidy
+
+# Print the pinned Pulumi CLI version (consumed by CI's pulumi/actions step).
+pulumi-version::
+	@echo $(PULUMI_VERSION)
+
+# Fail unless the Pulumi CLI on PATH is the pinned version.
+check-pulumi::
+	@test -n "$(PULUMI_VERSION)" || { echo "cannot read pulumi/pkg/v3 version from provider/go.mod" >&2; exit 1; }
+	@actual="$$(pulumi version)"; [ "$$actual" = "v$(PULUMI_VERSION)" ] || { \
+	  echo "Pulumi CLI $$actual on PATH; this repo pins v$(PULUMI_VERSION) (provider/go.mod pulumi/pkg/v3)." >&2; \
+	  echo "Install: https://get.pulumi.com/releases/sdk/pulumi-v$(PULUMI_VERSION)-<os>-<arch>.tar.gz" >&2; exit 1; }
 
 # Fetch the pinned OpenAPI spec (build artifact — never committed). The file rule
 # fetches only when the spec is absent; `make fetch` forces a re-verified refetch.
@@ -53,7 +70,7 @@ generate_schema:: gen $(SPEC)
 
 # Generate the Python SDK from the freshly generated schema. gen-sdk appends a
 # language-named subdirectory, so --out=sdk yields sdk/python.
-python_sdk:: generate_schema
+python_sdk:: check-pulumi generate_schema
 	rm -rf sdk/python
 	pulumi package gen-sdk --language python --out sdk $(SCHEMA_FILE)
 

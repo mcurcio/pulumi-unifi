@@ -9,7 +9,9 @@
 
 ## Prerequisites
 
-- [Pulumi CLI](https://www.pulumi.com/docs/install/)
+- [Pulumi CLI](https://www.pulumi.com/docs/install/) at the version the repository
+  pins (`make pulumi-version`, read from `provider/go.mod`); SDK generation
+  refuses any other
 - Go (matching the version in the repository's CI, currently `1.26`) to build
   the plugin
 - Python 3.9+ for the Python SDK

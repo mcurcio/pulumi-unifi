@@ -92,7 +92,8 @@ fetches the spec first), `make test-mock` (Tier-1 read + write dispatch tests ag
 mock; needs Docker), `make install` (plugin into local Pulumi cache). Also: `ensure`, `gen`, `generate_schema`,
 `python_sdk`, `clean`. `make build`/`test`/`generate` all auto-fetch the spec if absent.
 
-Prereqs: Go 1.26, Pulumi CLI, Python 3 + venv, network access to GitHub (build fetches the pinned
+Prereqs: Go 1.26, Pulumi CLI at exactly the `pulumi/pkg/v3` version in `provider/go.mod`
+(`make pulumi-version`; `make python_sdk` refuses any other), Python 3 + venv, network access to GitHub (build fetches the pinned
 spec), Docker (Compose v2) for the mock/e2e tiers, and for live testing a reachable **UniFi OS
 Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
 
