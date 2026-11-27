@@ -227,3 +227,29 @@ Any gate the implementation cannot run is reported **NOT RUN**, never assumed.
 `uos-fetch`, `uos-model`, `private-check`, `uos-parity`, `test-e2e-private`; `PRIVATE=1` switches
 `generate_schema`/`build`/`python_sdk` to the merged surface. Existing targets keep their behaviour at
 `PRIVATE=0`.
+
+## 14. Deviations recorded during implementation
+
+### Step 1: extractor, Kind model, overrides (built and measured)
+
+**Measured result.** The Go extractor (`provider/pkg/uos`, standard library only, no JDK, no
+Python) reads the pinned installer in about 16 s and gives the same model twice. On both 5.1.15 and
+5.1.42, read straight from the installers, `make uos-parity` finds every route the prototype finds
+(614 and 622) and reaches the prototype's spec bar: 73/73 routes, 157/161 request fields, 154/157
+required, 8/12 enums. 813 of the prototype's 814 request-field facts agree on the 31 (30) CRUD
+collections, and the 4 slice kinds match exactly. The one difference is a prototype bug (see 3 below).
+
+| # | Design said | Implementation | Why |
+|---|---|---|---|
+| 1 | §6: `expose:` entries carry `itemGet` | `itemGet:` is its own section; `expose:` has no `itemGet` | The 405 measured on `acl-rules` and `static-dns` (which are not exposed) is recorded too. Every entry has `source:` |
+| 2 | §3: "`itemGet` is not in the bytecode" | The model sets `itemGet` from the route table: is there a GET on the item path? The overrides record the 405s that were measured live | The route table has no item GET for exactly the 4 kinds measured at 405. `TestPrivateSliceKinds` checks that the two sources agree |
+| 3 | §2: a port of `routes.py` and `dto.py --crud` | The port works on parsed class files and improves on the prototype in three measured ways: (a) handlers that declare `throws` are found (9 more routes on 5.1.15, 10 on 5.1.42); (b) every custom-validator message is kept, as a sorted list, where `dto.py` kept one, picked by Python set order; (c) enum constants come only from `ACC_ENUM` fields, which drops a bogus value the prototype read from a `wan-slas` constant. A `@Value.Default` counts as a constant only for `<const>; [boxing valueOf;] return`. Anything else is `defaultComputed` | Correctness. The parity test accepts (b); (c) is the one logged difference |
+| 4 | §3: Kind `{name, api, collection, itemPath, verbs, itemGet, idField, envelope, polymorph?, fields}` | Also `createPath` (`content-filtering/create`-style creates), `listGet` (`network-members-group` has no list GET) and `createList` (`firewall-app-blocks` POSTs a list). Paths are relative to the API's site base | The binding needs all three. `network-members-group` import-by-listing must find another way to list (slice-1 engine) |
+| 5 | §3: Field `{wireName, type, enum[], items?, fields?, pattern?, constraints{len,size,custom}, required, default?, readOnly, secret, source}` | Also `values` (map values), `polymorph` on object fields (for example `qos-rules` `source`/`destination`), `optional` (`Optional<>`), `defaultComputed`, `writeOnly`. Constraints also hold `min`, `max` and `nonEmpty`, and `custom` is a list. Types also include `date`, `datetime` and `any` (a library type maps to `any`) | Facts present in the bytecode. The generator decides how to surface them. No obfuscated class name enters the model |
+| 6 | §3: `source: {uosVersion, networkVersion, installerSha256, extractorVersion}` | Also `integrationSha256` | The pin tie can then be checked from the model alone |
+| 7 | — | Classic kinds: `verbs` is empty, and `listGet`/`itemGet` are false. `collection` is `rest/<lowercase name>`, or `rest/setting/<section>` for settings sections | `api/fields` does not state them. Unknown until the slice-2 write probe |
+| 8 | §5 twin list | `officialTwins:` entries also list the official golden tokens that serve the kind (`official:`). A test checks them against `provider/pkg/gen/testdata/tokens.txt` | Turns "an official resource serves it" into a fact a test can check. **Open:** at 10.4.57 the provider surfaces ACL rules only as functions (`getIpAclRule`, `getMacAclRule`, `listAclRules`), not as resources, so treating `acl-rules` as a twin leaves ACL writes uncovered. The owner should decide whether that stays |
+| 9 | §11: `private-check` covers the digests, `tokens.txt`, the surface lint and the pin tie | In step 1 it covers the model only: canonical form, the `model.json` digest, the pin ties, `kinds.yaml` resolving against the model, the slice kinds' facts, and extract-twice determinism. `tokens.txt`, the other digests and the surface lint come with the generator (step 2) | They need the generator's output |
+| 10 | §2: `TestNoUbiquitiArtifacts` (no file named) | `provider/pkg/uos/licence_test.go`, in `make test`. It checks tracked files and untracked, unignored ones. A `.class` file is allowed only under `provider/pkg/uos/testdata/classes/` and only next to its own source. The fixture build compiles against self-written annotation stubs (`testdata/java/stubs`, same names as Spring, Jackson, Jakarta, Hibernate, Immutables and Swagger) whose classes are not committed | Fixtures must be our own bytes |
+| 11 | §11: model-backed tests "log `NOT RUN (no model)`" | They run only when `UNIFI_UOS_MODEL` (and, for determinism, `UNIFI_UOS_INSTALLER`) is set. `make private-check` sets both, plus `UNIFI_REQUIRE_UOS_MODEL=1`. A plain `make test` skips them with `NOT RUN`, whatever local files exist | A stale local model must not break `make test` |
+| 12 | §11: `uos-parity` takes `UOS_ORACLE_CRUD=<path>` | It also takes `UOS_ORACLE_ROUTES=<routes.tsv>`. The classes come from the installer (`UOS_INSTALLER`), or from the prototype's `classes/` directory (`UOS_ORACLE_CLASSES`) | Route parity is measured too |

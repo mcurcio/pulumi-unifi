@@ -91,6 +91,11 @@ metadata/openapi_generated.yml + Python SDK; deterministic — re-run yields no 
 fetches the spec first), `make test-mock` (Tier-1 read + write dispatch tests against the Prism TLS
 mock; needs Docker), `make install` (plugin into local Pulumi cache). Also: `ensure`, `gen`, `generate_schema`,
 `python_sdk`, `clean`. `make build`/`test`/`generate` all auto-fetch the spec if absent.
+Private API (local/offline, needs the pinned 875 MB UniFi OS Server installer from `uos/pin.env`;
+`UOS_INSTALLER=<path>` reuses a local copy): `make uos-fetch` (installer → cache outside the repo),
+`make uos-model` (→ gitignored `build/uos/model.json`), `make private-check` (model digest, pin ties,
+`kinds.yaml` resolution, extract-twice determinism), `make uos-parity` (Go extractor vs the
+`tools/uos-extract` prototype and the shipped official spec). See `docs/design/private-binding.md`.
 
 Prereqs: Go 1.26, Pulumi CLI, Python 3 + venv, network access to GitHub (build fetches the pinned
 spec), Docker (Compose v2) for the mock/e2e tiers, and for live testing a reachable **UniFi OS
