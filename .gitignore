@@ -34,6 +34,12 @@ vendor/
 Pulumi.*.yaml
 .pulumi/
 
+# --- Private-API model (built from the pinned installer; never committed) ---
+# build/uos/model.json is extracted from Ubiquiti's installer (uos/pin.env) and
+# holds bulk extracted text: it stays a gitignored build artifact (design §9).
+# (build/ is also covered by the Python section below; listed for clarity.)
+/build/uos/
+
 # --- Python (generated SDK + local envs) ---
 __pycache__/
 *.py[cod]
@@ -56,6 +62,9 @@ venv/
 # openapi/pin.env is the committed pin manifest (spec version/SHA/checksum — the
 # single source of truth), NOT a secret. Force-track it past the *.env rule.
 !openapi/pin.env
+# uos/pin.env is the committed UniFi OS Server installer pin (version, URL,
+# size, SHA-256), the private-API model source. Not a secret either.
+!uos/pin.env
 # test/e2e/seed.env is the THROWAWAY e2e controller's baked key + bundled Network
 # version — committed on purpose (disposable test controller), so force-track it
 # past the *.env rule too. The seed snapshot itself (test/e2e/unifi-seed.tgz) is
