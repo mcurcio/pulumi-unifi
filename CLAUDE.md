@@ -89,7 +89,9 @@ insecure path loses automatic 429 retry.
 metadata/openapi_generated.yml + Python SDK; deterministic — re-run yields no diff), `make build`
 (fetch → generate → plugin binary `bin/pulumi-resource-unifi`), `make test` (Go unit gate, no Docker;
 fetches the spec first), `make test-mock` (Tier-1 read + write dispatch tests against the Prism TLS
-mock; needs Docker), `make install` (plugin into local Pulumi cache). Also: `ensure`, `gen`, `generate_schema`,
+mock; needs Docker), `make install` (plugin into local Pulumi cache). `PRIVATE=1` (with the pinned UniFi OS Server installer) merges
+the private-API kinds (`unifi:network:*`, docs/design/private-binding.md) into the gitignored `schema.merged.json`, the
+plugin and the SDK; the default `PRIVATE=0` leaves every artifact identical to the golden. Also: `ensure`, `gen`, `generate_schema`,
 `python_sdk`, `clean`. `make build`/`test`/`generate` all auto-fetch the spec if absent.
 Private API (local/offline, needs the pinned 875 MB UniFi OS Server installer from `uos/pin.env`;
 `UOS_INSTALLER=<path>` reuses a local copy): `make uos-fetch` (installer → cache outside the repo),

@@ -253,3 +253,36 @@ collections, and the 4 slice kinds match exactly. The one difference is a protot
 | 10 | §2: `TestNoUbiquitiArtifacts` (no file named) | `provider/pkg/uos/licence_test.go`, in `make test`. It checks tracked files and untracked, unignored ones. A `.class` file is allowed only under `provider/pkg/uos/testdata/classes/` and only next to its own source. The fixture build compiles against self-written annotation stubs (`testdata/java/stubs`, same names as Spring, Jackson, Jakarta, Hibernate, Immutables and Swagger) whose classes are not committed | Fixtures must be our own bytes |
 | 11 | §11: model-backed tests "log `NOT RUN (no model)`" | They run only when `UNIFI_UOS_MODEL` (and, for determinism, `UNIFI_UOS_INSTALLER`) is set. `make private-check` sets both, plus `UNIFI_REQUIRE_UOS_MODEL=1`. A plain `make test` skips them with `NOT RUN`, whatever local files exist | A stale local model must not break `make test` |
 | 12 | §11: `uos-parity` takes `UOS_ORACLE_CRUD=<path>` | It also takes `UOS_ORACLE_ROUTES=<routes.tsv>`. The classes come from the installer (`UOS_INSTALLER`), or from the prototype's `classes/` directory (`UOS_ORACLE_CLASSES`) | Route parity is measured too |
+
+### Step 2: codegen and runtime binding (built and measured)
+
+**Measured result.** `make PRIVATE=1 build python_sdk` turns the pinned model into 4 resources
+(`tokens.txt`), 4 object types and the `networkBaseUrl` config key in `schema.merged.json`, the
+engine's kind table in `private.json`, and `pulumi_unifi.network` in the SDK. Both files match
+`digests.txt`, and two generations are byte-identical. At `PRIVATE=0`, `schema.merged.json` is
+`schema.json` byte for byte and `private.json` serves no kinds. A manual smoke run (not a committed
+gate; `make test-e2e-private` is step 3) drove the Pulumi CLI 3.230.0 and the `PRIVATE=1` SDK against
+UniFi OS Server 5.1.15 before the wizard, through `test/e2e-private/fwd`. `up` created all 4 kinds
+with `private:` ids, and `refresh` then `preview --expect-no-changes` was clean. A raw PUT to
+unmanaged `enabled` and `download_burst`, followed by an `up` that changed `download_limit_kbps` and
+dropped `destination.port_matching_type`, kept both unmanaged values and reset the dropped one to its
+model default (`ANY`). A raw PUT to a managed field showed as exactly that diff. `pulumi import` by
+natural key worked, and `destroy` left no objects.
+
+| # | Design said | Implementation | Why |
+|---|---|---|---|
+| 13 | §6 sections | A `listPath:` section names a collection GET that lives elsewhere: `network-members-group` lists at `network-members-groups` (route table, then confirmed live). With an entry, `listGet` is true | Import by natural key and list + filter need a list (step-1 open issue) |
+| 14 | §5: "Gen error if an exposed kind has `polymorph`" | Still true for a body-level union. A nested union on an object field (`qos-rules` `source`/`destination`) becomes one object type holding the base fields plus every variant's fields, all optional. Two variants that define a field differently are a gen error | The slice needs `qos-rules`. Pulumi tagged unions stay deferred |
+| 15 | §5: Required = extracted + `implicitRequired` + natural key | Extracted required counts only when the field has no decoded default, because the controller fills a defaulted field | `matching_target` is `@NotNull` with default `ANY`. A required input would make users restate the default |
+| 16 | §8: drop to "its default (model or overrides)" | A field the model marks `Optional<>`, with no other default, resets to `null`. Any other field without a default is still a Check error (G-Q1) | `Optional.empty` is the Java "off". Recorded in the schema description ("Removing it clears it.") |
+| 17 | §5: read-only fields are outputs only | Top-level read-only fields are outputs. Nested read-only fields are left out of the shared object types | The object types serve both inputs and outputs. None of the slice kinds has a nested read-only field |
+| 18 | §8 Check: "values read back are never rejected" | Check validates a leaf only when it differs from the old input at the same path. After an import or a refresh, the old inputs are what the controller returned | This is how rule 1 is enforced |
+| 19 | §8 Diff | The detailed diff is keyed by dotted property path (`destination.portMatchingType`), so a nested drop shows at its own path, not as a delete of the whole object | Accurate previews |
+| 20 | §8 Update: "deep-merge onto a fresh read, full PUT" | The PUT body is the fresh read without read-only fields, with the id kept and unmodelled keys left as the controller holds them. Dropped paths are set to their defaults, then the new inputs' managed paths go on top. A new leaf value replaces any subtree under it | The controller accepted this on all 4 kinds |
+| 21 | §8 Create | After the POST the object is read back (item GET, or list + filter), so the outputs hold the controller's defaults. When the response carries no id, the object is found by natural key | `qos-rules` returns server-filled `index`, `download_burst` and `upload_burst` |
+| 22 | §7: `apiKey` "no auth header when unset" | When private kinds are served and no `apiKey` is set, the dispatcher configures only the private client. Official calls then fail with the framework's "API key is required" message. At `PRIVATE=0`, Configure is forwarded unchanged | The framework callback rejects an empty key. The e2e runs without one |
+| 23 | §2 dispatch | `provider.Serve` takes a `Wrap`, and the plugin always wraps the framework with `private.NewDispatcher`: one binary shape. GetSchema returns `schema.merged.json`. The framework still runs on the golden. `transport.go` exports `InsecureTransport()` for the private client | §4 "one binary shape" |
+| 24 | §11 `make test` | Tier-1 adds engine, binding and dispatcher tests against `internal/fakectl`, an in-memory v2 controller with synthetic kinds (`Thing`: item GET, `_id`, nested defaults, a secret; `Group`: 405, `id`, another list path, list create). Generator tests run on a synthetic model, and `TestNoModelIsGolden` checks the `PRIVATE=0` byte identity. `make test-sdk` also runs `test/sdk/test_private_smoke.py`: it skips at `PRIVATE=0` and is required at `PRIVATE=1` | Request shapes and rules are tested without Docker |
+| 25 | §11 `private-check` | It also runs `provider/pkg/private/gen` `TestPrivateSurfaceGolden`: the `schema.merged.json` and `private.json` digests, `tokens.txt`, the private surface lint (token grammar, golden entries unchanged, property names, secret-looking names flagged, schema and kind table agree, Pulumi `ImportSpec` binds) and two-run determinism | Completes step-1 deviation 9 |
+| 26 | §11 step 3 (Boot) | **Live finding:** the image's Network app requires a **version-5** `UOS_UUID`. A v4 UUID from `/proc/sys/kernel/random/uuid` (the research recipe) fails its `systemService` bean with "Invalid uuid version - 4", and `:8081` never opens. The smoke run used `uuid5(NAMESPACE_DNS, "pulumi-unifi-e2e-private")` | Step 3's `run.sh` must generate a v5 UUID |
+| 27 | §2 `test/e2e-private/fwd` | Committed in step 2 (used by the smoke run) | — |
