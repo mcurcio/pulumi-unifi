@@ -137,6 +137,22 @@ func TestDispatcherConfigAndRouting(t *testing.T) {
 	if err != nil || rr.Id != cr.Id || len(rr.Inputs.GetFields()) != 2 {
 		t.Fatalf("read: %v %v", rr, err)
 	}
+	// A declared secret input stays secret through a refresh (the engine
+	// does not re-apply secretness for a provider that accepts secrets).
+	sec := mustStruct(t, map[string]any{"name": "t1", "mode": "SLOW", "psk": "s3cret"})
+	sr, err := d.Read(ctx, &pulumirpc.ReadRequest{Urn: thingURN, Id: cr.Id, Inputs: sec, Properties: cr.Properties})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, st := range map[string]*structpb.Struct{"inputs": sr.Inputs, "properties": sr.Properties} {
+		got, err := plugin.UnmarshalProperties(st, marshalOpts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v, ok := got["psk"]; !ok || !v.IsSecret() {
+			t.Errorf("%s: psk must stay a secret after a refresh: %v", name, got["psk"])
+		}
+	}
 	news := mustStruct(t, map[string]any{"name": "t1", "mode": "FAST"})
 	df, err := d.Diff(ctx, &pulumirpc.DiffRequest{Urn: thingURN, Id: cr.Id, OldInputs: in, News: news})
 	if err != nil || df.Changes != pulumirpc.DiffResponse_DIFF_SOME || df.DetailedDiff["mode"].Kind != pulumirpc.PropertyDiff_UPDATE {

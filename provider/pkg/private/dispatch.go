@@ -202,17 +202,6 @@ func marshal(pm resource.PropertyMap) (*structpb.Struct, error) {
 	return plugin.MarshalProperties(pm, marshalOpts)
 }
 
-// secretOutputs marks secret fields in outputs as secrets.
-func secretOutputs(k *engine.Kind, pm resource.PropertyMap) resource.PropertyMap {
-	for _, f := range k.Fields {
-		key := resource.PropertyKey(f.Property)
-		if v, ok := pm[key]; ok && f.Secret && !v.IsSecret() {
-			pm[key] = resource.MakeSecret(v)
-		}
-	}
-	return pm
-}
-
 func (d *Dispatcher) unknownKind(urn string) error {
 	return fmt.Errorf("%s is not served by this build of the provider (private kinds: %v); build with PRIVATE=1",
 		resource.URN(urn).Type(), d.surface.Tokens())
@@ -322,7 +311,7 @@ func (d *Dispatcher) Create(ctx context.Context, req *pulumirpc.CreateRequest) (
 	if err != nil {
 		return nil, err
 	}
-	props, err := marshal(secretOutputs(k, out))
+	props, err := marshal(out)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +342,7 @@ func (d *Dispatcher) Read(ctx context.Context, req *pulumirpc.ReadRequest) (*pul
 	if r == nil {
 		return &pulumirpc.ReadResponse{}, nil // gone
 	}
-	props, err := marshal(secretOutputs(k, r.Outputs))
+	props, err := marshal(r.Outputs)
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +384,7 @@ func (d *Dispatcher) Update(ctx context.Context, req *pulumirpc.UpdateRequest) (
 	if err != nil {
 		return nil, err
 	}
-	props, err := marshal(secretOutputs(k, out))
+	props, err := marshal(out)
 	if err != nil {
 		return nil, err
 	}
