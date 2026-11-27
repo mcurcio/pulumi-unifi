@@ -160,8 +160,14 @@ on an authenticated controller; slice 1 logs the pin it was built for.
 pin, the token names, and the few route and field names in `kinds.yaml`, each with its evidence. These
 are interoperability facts, the same position as go-unifi's MPL-licensed patches. Bulk extracted text
 (field files, class data, the model, the generated private schema and SDK) is never committed. A
-`make test` check (`TestNoUbiquitiArtifacts`) fails if a tracked file is a `.class`/`.jar`, sits under
-`fields/`, or is a JSON file shaped like `api/fields` (a top-level object of validation-string leaves).
+`make test` check (`TestNoUbiquitiArtifacts`) fails if a tracked or unignored file is a `.class`/`.jar`, sits under
+`fields/`, is a JSON file shaped like `api/fields` (a top-level object of validation-string leaves), is
+shaped like the extracted model (a top-level `kinds` list that is non-empty or carries
+`source.networkVersion`/`integrationSha256`; only the synthetic `provider/pkg/uos/testdata/fixture-model.json`
+is exempt), is JSON naming a `unifi:network:` token (a generated private schema or surface), or is an
+archive (`.tar`, `.tgz`, ...), an ELF binary or any file over 4 MiB (the installer, `image.tar`, a dump).
+The Tier-2 seed `test/e2e/unifi-seed.tgz` (committed on main, Git LFS) is the one archive exempt; this
+gate does not re-decide it.
 Builds a user makes locally contain field names; **whether to publish a private-capable SDK or plugin is
 left to the owner at Phase 5**.
 
