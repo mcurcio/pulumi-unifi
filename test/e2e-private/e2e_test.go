@@ -14,6 +14,9 @@
 //	PATH          with the plugin directory and the SDK venv's bin first
 //
 // No apiKey is used: the controller is reached directly, before the wizard.
+// The Pulumi CLI and the provider get the caller's environment without its
+// UNIFI_* provider variables (childEnv), and the stacks pin siteId, so a
+// developer's real key or site never reaches the throwaway controller.
 package e2e
 
 import (
@@ -308,7 +311,7 @@ func TestPrivateE2E(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	p := &cli{t: t, bin: bin, dir: prog, logs: filepath.Join(work, "pulumi.log"), env: append(os.Environ(),
+	p := &cli{t: t, bin: bin, dir: prog, logs: filepath.Join(work, "pulumi.log"), env: append(childEnv(),
 		"PULUMI_HOME="+home,
 		"PULUMI_BACKEND_URL=file://"+state,
 		"PULUMI_SKIP_UPDATE_CHECK=1",
@@ -371,6 +374,7 @@ func TestPrivateE2E(t *testing.T) {
 
 	stackInit("main", map[string]string{
 		"unifi:networkBaseUrl":     base,
+		"unifi:siteId":             "default",
 		"unifi-e2e-private:prefix": prefix,
 		"unifi-e2e-private:step":   "1",
 		"unifi-e2e-private:mode":   "main",
@@ -480,6 +484,7 @@ func TestPrivateE2E(t *testing.T) {
 		// bare form and field=value, then declares them with no changes.
 		stackInit("imp", map[string]string{
 			"unifi:networkBaseUrl":     base,
+			"unifi:siteId":             "default",
 			"unifi-e2e-private:prefix": prefix,
 			"unifi-e2e-private:step":   "2",
 			"unifi-e2e-private:mode":   "import",
@@ -544,4 +549,22 @@ func TestPrivateE2E(t *testing.T) {
 		}
 		p.must("stack", "rm", "main", "--yes")
 	})
+}
+
+// childEnv is os.Environ() without the provider's UNIFI_* variables (apiKey,
+// apiHost, siteId, networkBaseUrl, allowInsecure), so none of a developer's
+// real controller settings leak into this tier.
+func childEnv() []string {
+	drop := map[string]bool{
+		"UNIFI_APIKEY": true, "UNIFI_API_HOST": true, "UNIFI_SITEID": true,
+		"UNIFI_NETWORK_BASE_URL": true, "UNIFI_ALLOW_INSECURE": true,
+	}
+	var out []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if !drop[name] {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

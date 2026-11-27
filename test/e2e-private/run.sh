@@ -28,6 +28,10 @@
 #   E2E_RELOAD=1    docker load the image again even if the tag exists
 set -euo pipefail
 
+# Never let a developer's real controller settings reach the throwaway
+# controller (the Go driver filters them too).
+unset UNIFI_APIKEY UNIFI_API_HOST UNIFI_SITEID UNIFI_NETWORK_BASE_URL UNIFI_ALLOW_INSECURE
+
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 command -v go >/dev/null 2>&1 || export PATH="$PATH:/usr/local/go/bin"
