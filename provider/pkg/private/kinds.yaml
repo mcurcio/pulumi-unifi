@@ -1,0 +1,109 @@
+# Private-API overrides and exposure allowlist (docs/design/private-binding.md §6).
+#
+# This is the ONLY committed place for private route and field names: a small,
+# hand-written set of editorial facts. Everything else about a private kind
+# comes from the extracted model (build/uos/model.json, gitignored), which is
+# built from the pinned UniFi OS Server installer (uos/pin.env).
+#
+# Rules (checked by provider/pkg/private, `make test` and `make private-check`):
+#   - every entry carries `source:`, the evidence that justifies it;
+#   - `kind:` is the model's kind name: the collection for v2 kinds
+#     ("qos-rules"), the field-file name for classic kinds ("NetworkConf");
+#     `api:` defaults to v2;
+#   - an entry that names a kind or field the model lacks is a LOUD error, so a
+#     version bump that renames something cannot pass silently;
+#   - an exposed kind may not be an official twin (whole-kind serving, G-Q4).
+#
+# Field paths are dotted wire names; list items add "[]" ("monitors[].name").
+version: 1
+
+# Allowlist: the private kinds the provider serves, with their Pulumi token
+# (unifi:network:<Token>) and natural key (rule 3: import by natural key).
+expose:
+  - kind: qos-rules
+    token: QosRule
+    naturalKey: [name]
+    source: "slice 1 (design §10): minimal create round-tripped live on 10.4.57 (docs/research/private-api-model-source.md, round-trip table)"
+  - kind: apgroups
+    token: ApGroup
+    naturalKey: [name]
+    source: "slice 1 (design §10): minimal create round-tripped live on 10.4.57; no device needed"
+  - kind: firewall-app-blocks
+    token: FirewallAppBlock
+    naturalKey: [name]
+    source: "slice 1 (design §10): minimal create round-tripped live on 10.4.57"
+  - kind: network-members-group
+    token: NetworkMembersGroup
+    naturalKey: [name]
+    source: "slice 1 (design §10): minimal create round-tripped live on 10.4.57; its id field is `id`, not `_id`"
+
+# Kinds an official (Integration API) resource already serves. Never exposed
+# privately (whole kinds, frame G-Q4). `official:` lists the golden tokens
+# (provider/pkg/gen/testdata/tokens.txt) that serve the kind.
+officialTwins:
+  - kind: static-dns
+    official: ["resource:unifi:sites/v1:DnsARecord", "resource:unifi:sites/v1:DnsAaaaRecord", "resource:unifi:sites/v1:DnsCnameRecord", "resource:unifi:sites/v1:DnsMxRecord", "resource:unifi:sites/v1:DnsSrvRecord", "resource:unifi:sites/v1:DnsTxtRecord"]
+    source: "official spec 10.4.57 serves DNS records (/v1/sites/{siteId}/dns/policies); design §5, §10"
+  - kind: acl-rules
+    official: ["function:unifi:sites/v1:getIpAclRule", "function:unifi:sites/v1:getMacAclRule", "function:unifi:sites/v1:listAclRules"]
+    source: "official spec 10.4.57 serves ACL rules (/v1/sites/{siteId}/acl-rules); the provider surfaces them as data sources today; design §5, §10"
+  - kind: firewall-policies
+    official: ["resource:unifi:sites/v1:FirewallPolicy"]
+    source: "official spec 10.4.57 serves firewall policies (/v1/sites/{siteId}/firewall/policies); design §5"
+  - kind: firewall/zone
+    official: ["resource:unifi:sites/v1:FirewallZone"]
+    source: "official spec 10.4.57 serves firewall zones (/v1/sites/{siteId}/firewall/zones); design §5"
+  - kind: NetworkConf
+    api: classic
+    official: ["resource:unifi:sites/v1:ManagedNetworkGateway", "resource:unifi:sites/v1:ManagedNetworkSwitch", "resource:unifi:sites/v1:ManagedNetworkUnmanaged"]
+    source: "official spec 10.4.57 serves networks (/v1/sites/{siteId}/networks); design §5"
+  - kind: WlanConf
+    api: classic
+    official: ["resource:unifi:sites/v1:WifiBroadcastStandard", "resource:unifi:sites/v1:WifiBroadcastIotOptimized"]
+    source: "official spec 10.4.57 serves Wi-Fi broadcasts (/v1/sites/{siteId}/wifi/broadcasts); design §5"
+  - kind: FirewallGroup
+    api: classic
+    official: ["resource:unifi:sites/v1:TrafficMatchIpv4Addresses", "resource:unifi:sites/v1:TrafficMatchIpv6Addresses", "resource:unifi:sites/v1:TrafficMatchPorts"]
+    source: "official spec 10.4.57 serves traffic matching lists (/v1/sites/{siteId}/traffic-matching-lists), the address/port groups FirewallGroup holds; design §5"
+
+# Item GET answers 405: the kind is read by listing the collection and
+# filtering by id. The route table also lacks the item GET for these.
+itemGet:
+  - kind: apgroups
+    itemGet: false
+    source: "live 10.4.57 (pre-wizard, :8081): GET apgroups/{id} -> 405; route table has no item GET"
+  - kind: firewall-app-blocks
+    itemGet: false
+    source: "live 10.4.57 (pre-wizard, :8081): GET firewall-app-blocks/{id} -> 405; route table has no item GET"
+  - kind: acl-rules
+    itemGet: false
+    source: "live 10.4.57 (pre-wizard, :8081): GET acl-rules/{id} -> 405; route table has no item GET"
+  - kind: static-dns
+    itemGet: false
+    source: "live 10.4.57 (pre-wizard, :8081): GET static-dns/{id} -> 405; route table has no item GET"
+
+# Required in practice but not annotated: a create without them fails with a
+# 500 NullPointerException naming nothing else.
+implicitRequired:
+  - kind: firewall/zone
+    fields: [network_ids]
+    source: "live 10.4.57 minimal create: 500 NullPointerException without network_ids (also go-unifi's documented hand patch)"
+  - kind: static-dns
+    fields: [record_type]
+    source: "live 10.4.57 minimal create: 500 NullPointerException without record_type; passes once it is supplied"
+  - kind: nat
+    fields: [source_filter]
+    source: "live 10.4.57 minimal create: 500 NullPointerException without source_filter"
+
+# Cross-field checks run in Check. None in slice 1.
+rules: []
+
+# Values a dropped managed field resets to where the model states none (G-Q1).
+# Added as the e2e measures them, each with source: "live create 10.4.57".
+defaults: []
+
+# Field facts, filled from e2e findings.
+createOnly: []
+notReturned: []
+notSecret: []
+rename: []
