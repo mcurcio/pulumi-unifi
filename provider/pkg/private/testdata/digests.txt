@@ -2,3 +2,5 @@
 # (hashes only, no Ubiquiti text). Checked by `make private-check`; after a
 # reviewed change, refresh with `UPDATE_GOLDEN=1 make private-check`.
 model.json b396e2bb9734b66d4df641998905f75a8586f4f516261a840fa77fb2b8d17f17
+schema.merged.json 153d934ce7bfa0434afe783e54c68583286793b798882bf97be98e4826d82c88
+private.json 8b5fdd12faf4773fb7d1db3ce0942afd09ba1452ac00333a78bbb4cbe4809ff3

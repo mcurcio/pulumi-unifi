@@ -25,6 +25,16 @@ UOS_MODEL    := build/uos/model.json
 UOS_SRC      := $(wildcard provider/pkg/uos/*.go provider/pkg/kind/*.go provider/cmd/pulumi-gen-unifi/*.go)
 GEN_DIR      := provider/cmd/pulumi-resource-$(PACK)
 SCHEMA_FILE  := $(GEN_DIR)/schema.json
+# The private-API switch (docs/design/private-binding.md §4). PRIVATE=0 (the
+# default, and CI): schema.merged.json is the schema.json golden byte for byte
+# and private.json serves no kinds, so every existing gate sees no change.
+# PRIVATE=1: generate_schema needs build/uos/model.json (the pinned installer)
+# and merges the private kinds (unifi:network:*) into the merged schema, the
+# plugin and the SDK. The merged schema and private.json are gitignored.
+PRIVATE      ?= 0
+MERGED_SCHEMA := $(GEN_DIR)/schema.merged.json
+PRIVATE_MODEL_DEP := $(if $(filter 1,$(PRIVATE)),$(UOS_MODEL),)
+PRIVATE_MODEL_ARG := $(if $(filter 1,$(PRIVATE)),-model $(UOS_MODEL),)
 BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
@@ -54,15 +64,19 @@ fetch::
 gen::
 	cd provider && go build $(LDFLAGS) -o $(BIN)/$(CODEGEN) ./cmd/pulumi-gen-$(PACK)
 
-# Run the code generator: spec -> schema.json + metadata.json + openapi_generated.yml.
-generate_schema:: gen $(SPEC)
+# Run the code generator: spec -> schema.json + metadata.json + openapi_generated.yml,
+# then the private merge -> schema.merged.json + private.json (with PRIVATE=0,
+# a byte copy of the golden and an empty kind table).
+generate_schema:: gen $(SPEC) $(PRIVATE_MODEL_DEP)
 	$(BIN)/$(CODEGEN) -spec=$(SPEC) -out=$(GEN_DIR) -version=$(VERSION) schema
+	$(BIN)/$(CODEGEN) private $(PRIVATE_MODEL_ARG) -golden $(SCHEMA_FILE) -out $(GEN_DIR)
 
-# Generate the Python SDK from the freshly generated schema. gen-sdk appends a
-# language-named subdirectory, so --out=sdk yields sdk/python.
+# Generate the Python SDK from the freshly generated merged schema (the golden
+# at PRIVATE=0). gen-sdk appends a language-named subdirectory, so --out=sdk
+# yields sdk/python.
 python_sdk:: generate_schema
 	rm -rf sdk/python
-	pulumi package gen-sdk --language python --out sdk $(SCHEMA_FILE)
+	pulumi package gen-sdk --language python --out sdk $(MERGED_SCHEMA)
 
 # Deterministic umbrella: fetch + regenerate every build artifact from the pinned spec.
 generate:: python_sdk
@@ -155,6 +169,7 @@ test-sdk:: python_sdk
 	$(WORKING_DIR)/.sdkvenv/bin/pip install -q --upgrade pip
 	$(WORKING_DIR)/.sdkvenv/bin/pip install -q pytest pulumi ./sdk/python
 	$(WORKING_DIR)/.sdkvenv/bin/python -m pytest test/sdk/test_smoke.py -q
+	UNIFI_REQUIRE_PRIVATE_SDK=$(PRIVATE) $(WORKING_DIR)/.sdkvenv/bin/python -m pytest test/sdk/test_private_smoke.py -q
 
 # Tier-2 ONE-TIME seed bake. Boots a blank heavy UniFi OS Server stack (the only
 # image that authenticates the Integration API), pauses for the maintainer to
@@ -196,7 +211,9 @@ $(UOS_MODEL): uos/pin.env openapi/pin.env $(UOS_SRC) | $(UOS_INSTALLER_FILE)
 
 uos-model:: $(UOS_MODEL)
 
-# HARD private-model gate (needs the installer): model digest vs
+# HARD private-model gate (needs the installer): the generated private surface
+# (schema.merged.json + private.json digests, tokens.txt, the private surface
+# lint); model digest vs
 # provider/pkg/private/testdata/digests.txt, canonical form, the pin ties
 # (Network version == SPEC_VERSION; the installer's integration.json SHA-256
 # == SPEC_SHA256), kinds.yaml resolving against the model, the slice kinds'
@@ -205,7 +222,7 @@ uos-model:: $(UOS_MODEL)
 # UPDATE_GOLDEN=1 make private-check.
 private-check:: $(UOS_MODEL)
 	cd provider && UNIFI_REQUIRE_UOS_MODEL=1 UNIFI_UOS_MODEL=$(WORKING_DIR)/$(UOS_MODEL) \
-		UNIFI_UOS_INSTALLER=$(UOS_INSTALLER_FILE) go test -count=1 -v -run 'TestPrivate' ./pkg/private/
+		UNIFI_UOS_INSTALLER=$(UOS_INSTALLER_FILE) go test -count=1 -v -run 'TestPrivate' ./pkg/private/ ./pkg/private/gen/
 
 # Differential oracle: the Go extractor vs the research prototype
 # (tools/uos-extract) and vs the official spec shipped in the same image (the
