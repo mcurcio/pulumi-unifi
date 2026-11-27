@@ -29,6 +29,7 @@ type Overrides struct {
 	Expose           []Expose    `yaml:"expose"`
 	OfficialTwins    []Twin      `yaml:"officialTwins"`
 	ItemGet          []ItemGet   `yaml:"itemGet"`
+	ListPath         []ListPath  `yaml:"listPath"`
 	ImplicitRequired []FieldList `yaml:"implicitRequired"`
 	Rules            []Rule      `yaml:"rules"`
 	Defaults         []Default   `yaml:"defaults"`
@@ -76,6 +77,14 @@ type ItemGet struct {
 	Ref     `yaml:",inline"`
 	ItemGet bool   `yaml:"itemGet"`
 	Source  string `yaml:"source"`
+}
+
+// ListPath names the collection GET of a kind whose list lives elsewhere
+// than its create path (relative to the API's site base).
+type ListPath struct {
+	Ref    `yaml:",inline"`
+	Path   string `yaml:"path"`
+	Source string `yaml:"source"`
 }
 
 // FieldList names fields of one kind.
@@ -129,6 +138,7 @@ func Parse(b []byte) (*Overrides, error) {
 
 var (
 	reToken = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
+	reRoute = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)*$`)
 	rePath  = regexp.MustCompile(`^[A-Za-z0-9_]+(\[\])*(\.[A-Za-z0-9_]+(\[\])*)*$`)
 )
 
@@ -197,6 +207,17 @@ func (o *Overrides) Validate() error {
 			add("itemGet[%d] %s: listed twice", i, g.Ref)
 		}
 		seen[g.Ref.String()] = true
+	}
+	seenList := map[string]bool{}
+	for i, l := range o.ListPath {
+		checkRef("listPath", i, l.Ref, l.Source)
+		if !reRoute.MatchString(l.Path) {
+			add("listPath[%d] %s: bad path %q", i, l.Ref, l.Path)
+		}
+		if seenList[l.Ref.String()] {
+			add("listPath[%d] %s: listed twice", i, l.Ref)
+		}
+		seenList[l.Ref.String()] = true
 	}
 	for sec, ls := range map[string][]FieldList{"implicitRequired": o.ImplicitRequired, "createOnly": o.CreateOnly,
 		"notReturned": o.NotReturned, "notSecret": o.NotSecret} {
@@ -268,6 +289,9 @@ func (o *Overrides) Resolve(m *kind.Model) error {
 	}
 	for _, g := range o.ItemGet {
 		find("itemGet", g.Ref)
+	}
+	for _, l := range o.ListPath {
+		find("listPath", l.Ref)
 	}
 	for sec, ls := range map[string][]FieldList{"implicitRequired": o.ImplicitRequired, "createOnly": o.CreateOnly,
 		"notReturned": o.NotReturned, "notSecret": o.NotSecret} {

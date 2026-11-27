@@ -82,6 +82,13 @@ itemGet:
     itemGet: false
     source: "live 10.4.57 (pre-wizard, :8081): GET static-dns/{id} -> 405; route table has no item GET"
 
+# The collection GET lives at another path than the create path. Without an
+# entry the list path is the collection itself.
+listPath:
+  - kind: network-members-group
+    path: network-members-groups
+    source: "route table 10.4.57: GET /api/site/{siteName}/network-members-groups (plural); the singular collection answers only POST"
+
 # Required in practice but not annotated: a create without them fails with a
 # 500 NullPointerException naming nothing else.
 implicitRequired:

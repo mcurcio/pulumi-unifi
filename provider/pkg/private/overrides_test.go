@@ -90,6 +90,8 @@ func TestValidateRejects(t *testing.T) {
 		"default no val": {base + "defaults:\n  - {kind: a, field: f, source: s}\n", "value is missing"},
 		"rename no prop": {base + "rename:\n  - {kind: a, field: f, source: s}\n", "property is empty"},
 		"rule no msg":    {base + "rules:\n  - {kind: a, fields: [f], source: s}\n", "message is empty"},
+		"list path":      {base + "listPath:\n  - {kind: a, path: \"/Bad Path\", source: s}\n", "bad path"},
+		"list path dup":  {base + "listPath:\n  - {kind: a, path: x, source: s}\n  - {kind: a, path: y, source: s}\n", "listed twice"},
 	} {
 		_, err := Parse([]byte(c.doc))
 		if err == nil || !strings.Contains(err.Error(), c.want) {
