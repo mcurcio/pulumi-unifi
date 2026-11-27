@@ -16,13 +16,20 @@ WORKING_DIR  := $(shell pwd)
 # bump touches only pin.env.
 include openapi/pin.env
 SPEC         := openapi/unifi-network-$(SPEC_VERSION).json
+# The pinned UniFi OS Server installer (uos/pin.env): the private-API model
+# source. It is fetched into a cache OUTSIDE the repo, never committed.
+include uos/pin.env
+UOS_CACHE    ?= $(if $(UNIFI_UOS_CACHE),$(UNIFI_UOS_CACHE),$(HOME)/.cache/pulumi-unifi/uos)
+UOS_INSTALLER_FILE := $(UOS_CACHE)/$(UOS_SHA256)/installer
+UOS_MODEL    := build/uos/model.json
+UOS_SRC      := $(wildcard provider/pkg/uos/*.go provider/pkg/kind/*.go provider/cmd/pulumi-gen-unifi/*.go)
 GEN_DIR      := provider/cmd/pulumi-resource-$(PACK)
 SCHEMA_FILE  := $(GEN_DIR)/schema.json
 BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
+.PHONY: uos-fetch uos-model private-check uos-parity ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
 
 DOCSVENV     := $(WORKING_DIR)/.docsvenv
 
@@ -167,6 +174,46 @@ e2e-bootstrap::
 # Docker + git-lfs (the seed is an LFS object); see test/e2e/README.md.
 test-e2e:: build
 	./test/e2e/run.sh
+
+# --- Private API: the model extractor (docs/design/private-binding.md) -------
+# None of these run in stock CI (an 875 MB download). They never write
+# Ubiquiti files into the repo: the installer lives in $(UOS_CACHE), the model
+# in the gitignored build/uos/.
+
+# Get the pinned installer into the cache (verifies size + pinned SHA-256).
+# UOS_INSTALLER=<path> reuses a local copy instead of downloading.
+uos-fetch::
+	./uos/fetch.sh
+
+$(UOS_INSTALLER_FILE):
+	./uos/fetch.sh
+
+# Extract the canonical Kind model from the installer (streamed in memory,
+# nothing executed). Rebuilt only when the pins or the extractor change.
+$(UOS_MODEL): uos/pin.env openapi/pin.env $(UOS_SRC) | $(UOS_INSTALLER_FILE)
+	$(MAKE) gen
+	$(BIN)/$(CODEGEN) uos-extract -installer $(UOS_INSTALLER_FILE) -pin uos/pin.env -spec-pin openapi/pin.env -out $@
+
+uos-model:: $(UOS_MODEL)
+
+# HARD private-model gate (needs the installer): model digest vs
+# provider/pkg/private/testdata/digests.txt, canonical form, the pin ties
+# (Network version == SPEC_VERSION; the installer's integration.json SHA-256
+# == SPEC_SHA256), kinds.yaml resolving against the model, the slice kinds'
+# facts, and determinism (extract twice -> identical bytes). A skipped test is
+# a failure here (UNIFI_REQUIRE_UOS_MODEL=1). After a reviewed model change:
+# UPDATE_GOLDEN=1 make private-check.
+private-check:: $(UOS_MODEL)
+	cd provider && UNIFI_REQUIRE_UOS_MODEL=1 UNIFI_UOS_MODEL=$(WORKING_DIR)/$(UOS_MODEL) \
+		UNIFI_UOS_INSTALLER=$(UOS_INSTALLER_FILE) go test -count=1 -v -run 'TestPrivate' ./pkg/private/
+
+# Differential oracle: the Go extractor vs the research prototype
+# (tools/uos-extract) and vs the official spec shipped in the same image (the
+# prototype's bar: 73/73 routes, 157/161 request fields, 154/157 required).
+# Pass the prototype's outputs to compare against them too:
+#   UOS_ORACLE_ROUTES=<routes.tsv> UOS_ORACLE_CRUD=<crud.json> make uos-parity
+uos-parity:: $(UOS_INSTALLER_FILE)
+	cd provider && UOS_INSTALLER=$(UOS_INSTALLER_FILE) go test -tags uosoracle -count=1 -v -run 'TestParity' ./pkg/uos/
 
 # --- Documentation (MkDocs Material + mike) ---------------------------------
 # The docs are fully isolated from the Go build and the SDK venv: an auto-
