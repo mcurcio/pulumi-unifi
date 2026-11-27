@@ -15,7 +15,14 @@ import (
 // changes. Acceptable for single-controller live testing against a self-signed
 // cert; the clean fix is an upstream exported transport constructor/setter.
 func injectInsecureTransport(c *http.Client) {
-	c.Transport = &http.Transport{
+	c.Transport = InsecureTransport()
+}
+
+// InsecureTransport is the allowInsecure transport: the framework's inner
+// *http.Transport settings with TLS verification off. The private API client
+// (provider/pkg/private) uses it too, so allowInsecure means the same on both.
+func InsecureTransport() *http.Transport {
+	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
