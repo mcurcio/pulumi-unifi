@@ -299,6 +299,15 @@ type DiffResult struct {
 // Diff compares old and new inputs over managed paths only: unmanaged fields
 // never diff. A createOnly field's change needs a replace.
 func (e *Engine) Diff(k *Kind, oldInputs, newInputs resource.PropertyMap) (DiffResult, error) {
+	return e.DiffLive(k, oldInputs, newInputs, nil)
+}
+
+// DiffLive is Diff with the outputs last read from the controller. A path the
+// new inputs start to manage is no change when its value equals what the
+// controller returned (rule 1: adopting a field at its live value changes
+// nothing). This is what makes a program that declares more than an import
+// adopted (natural key + required fields) preview with no changes.
+func (e *Engine) DiffLive(k *Kind, oldInputs, newInputs, oldOutputs resource.PropertyMap) (DiffResult, error) {
 	ow, err := ToWire(k, oldInputs)
 	if err != nil {
 		return DiffResult{}, err
@@ -306,6 +315,12 @@ func (e *Engine) Diff(k *Kind, oldInputs, newInputs resource.PropertyMap) (DiffR
 	nw, err := ToWire(k, newInputs)
 	if err != nil {
 		return DiffResult{}, err
+	}
+	var live map[string]any
+	if oldOutputs != nil {
+		if live, err = ToWire(k, oldOutputs); err != nil {
+			return DiffResult{}, err
+		}
 	}
 	res := DiffResult{Detailed: map[string]string{}}
 	mark := func(p Path, kind string) {
@@ -328,6 +343,9 @@ func (e *Engine) Diff(k *Kind, oldInputs, newInputs resource.PropertyMap) (DiffR
 		ov, had := Get(ow, p)
 		switch {
 		case !had:
+			if lv, ok := Get(live, p); ok && Equal(lv, nv) {
+				continue
+			}
 			mark(p, "add")
 		case !Equal(ov, nv):
 			mark(p, "update")
@@ -480,7 +498,19 @@ func (e *Engine) Read(ctx context.Context, k *Kind, id string, oldInputs resourc
 	}
 	res := &ReadResult{ID: IDPrefix + idOf(k, live)}
 	if importing || oldInputs == nil {
-		res.Inputs = FromWire(k, live, func(_ Path, f *Field) bool { return !f.ReadOnly && !f.Secret })
+		// The adopted managed paths are the natural key plus the required
+		// fields (nested: required within required). Pulumi does not pass an
+		// import's `properties` to the provider, so returning every writable
+		// field would make each one the program leaves out a dropped field
+		// (G-Q1). Paths the program adds at their live value diff as no change
+		// (DiffLive).
+		nk := map[string]bool{}
+		for _, w := range k.NaturalKey {
+			nk[w] = true
+		}
+		res.Inputs = FromWire(k, live, func(p Path, f *Field) bool {
+			return !f.ReadOnly && !f.Secret && (f.Required || len(p) == 1 && nk[p[0]])
+		})
 		res.Outputs = e.outputs(k, live, nil)
 		return res, nil
 	}

@@ -317,8 +317,24 @@ func TestImportByNaturalKey(t *testing.T) {
 		if r.ID != "private:"+a {
 			t.Errorf("%s: id %s", id, r.ID)
 		}
-		if r.Inputs["name"].StringValue() != "alpha" || r.Inputs["mode"].StringValue() != "SLOW" {
-			t.Errorf("%s: inputs %v", id, r.Inputs)
+		// The adopted managed paths are the natural key + the required
+		// fields (window.mode only within a required window; window is not
+		// required here, so it is not adopted).
+		if r.Inputs["name"].StringValue() != "alpha" || len(r.Inputs) != 1 {
+			t.Errorf("%s: inputs %v, want only the natural key", id, r.Inputs)
+		}
+		if r.Outputs["mode"].StringValue() != "SLOW" {
+			t.Errorf("%s: outputs %v keep every returned field", id, r.Outputs)
+		}
+		// A program that declares more than was adopted, at the live values,
+		// previews with no changes; a different value is a change.
+		same := pm(map[string]any{"name": "alpha", "mode": "SLOW"})
+		if d, err := e.DiffLive(k, r.Inputs, same, r.Outputs); err != nil || len(d.Changed) != 0 {
+			t.Errorf("%s: declaring live values after import: %v %v", id, d.Changed, err)
+		}
+		other := pm(map[string]any{"name": "alpha", "mode": "FAST"})
+		if d, _ := e.DiffLive(k, r.Inputs, other, r.Outputs); strings.Join(d.Changed, ",") != "mode" || d.Detailed["mode"] != "add" {
+			t.Errorf("%s: declaring a new value after import: %v %v", id, d.Changed, d.Detailed)
 		}
 		if _, ok := r.Inputs["createdAt"]; ok {
 			t.Errorf("%s: read-only fields are not inputs", id)

@@ -258,8 +258,15 @@ func (d *Dispatcher) Diff(ctx context.Context, req *pulumirpc.DiffRequest) (*pul
 		return nil, d.unknownKind(req.GetUrn())
 	}
 	oldS := req.GetOldInputs()
+	var outs resource.PropertyMap
 	if oldS == nil {
 		oldS = req.GetOlds()
+	} else if req.GetOlds() != nil {
+		o, err := unmarshal(req.GetOlds())
+		if err != nil {
+			return nil, err
+		}
+		outs = o
 	}
 	olds, err := unmarshal(oldS)
 	if err != nil {
@@ -269,7 +276,7 @@ func (d *Dispatcher) Diff(ctx context.Context, req *pulumirpc.DiffRequest) (*pul
 	if err != nil {
 		return nil, err
 	}
-	r, err := d.engine.Diff(k, olds, news)
+	r, err := d.engine.DiffLive(k, olds, news, outs)
 	if err != nil {
 		return nil, err
 	}
