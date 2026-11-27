@@ -186,7 +186,10 @@ func join(a, b string) string {
 }
 
 // FromWire converts a wire object into Pulumi properties. Only modelled
-// fields are kept; keep decides per field whether it is included.
+// fields are kept; keep decides per field whether it is included. A secret
+// field's value is marked secret at any depth (inputs and outputs alike: the
+// engine re-applies secretness to a Read's results only for providers that
+// do not accept secrets).
 func FromWire(k *Kind, obj map[string]any, keep func(Path, *Field) bool) resource.PropertyMap {
 	return fromWireObject(k.Fields, obj, nil, keep)
 }
@@ -202,7 +205,11 @@ func fromWireObject(fs map[string]*Field, obj map[string]any, at Path, keep func
 		if keep != nil && !keep(p, f) {
 			continue
 		}
-		out[resource.PropertyKey(f.Property)] = fromWire(f, obj[w], p, keep)
+		v := fromWire(f, obj[w], p, keep)
+		if f.Secret && !v.IsNull() {
+			v = resource.MakeSecret(v)
+		}
+		out[resource.PropertyKey(f.Property)] = v
 	}
 	return out
 }
@@ -307,7 +314,10 @@ func hasUnknown(v any) bool {
 }
 
 // LeafPaths lists the managed paths of a wire object: objects are walked into
-// (by the kind's object fields), everything else is a leaf. Sorted.
+// (by the kind's object fields), everything else is a leaf. An object field is
+// always a container, never a leaf, whatever it holds: a declared {} manages
+// no path, so its live subfields stay unmanaged (rule 2) and a refresh does
+// not adopt them (G-Q1). Sorted.
 func LeafPaths(k *Kind, obj map[string]any) []Path {
 	var out []Path
 	leafPaths(k.Fields, obj, nil, &out)
@@ -319,11 +329,31 @@ func leafPaths(fs map[string]*Field, obj map[string]any, at Path, out *[]Path) {
 	for w, v := range obj {
 		p := append(append(Path{}, at...), w)
 		f := fs[w]
-		if m, ok := v.(map[string]any); ok && f != nil && f.Type == "object" && len(m) > 0 {
+		if m, ok := v.(map[string]any); ok && f != nil && f.Type == "object" {
 			leafPaths(f.Fields, m, p, out)
 			continue
 		}
 		*out = append(*out, p)
+	}
+}
+
+// ObjectPaths lists the paths of the object-typed containers a wire object
+// declares (a declared {} included), outermost first. Sorted.
+func ObjectPaths(k *Kind, obj map[string]any) []Path {
+	var out []Path
+	objectPaths(k.Fields, obj, nil, &out)
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	return out
+}
+
+func objectPaths(fs map[string]*Field, obj map[string]any, at Path, out *[]Path) {
+	for w, v := range obj {
+		f := fs[w]
+		if m, ok := v.(map[string]any); ok && f != nil && f.Type == "object" {
+			p := append(append(Path{}, at...), w)
+			*out = append(*out, p)
+			objectPaths(f.Fields, m, p, out)
+		}
 	}
 }
 

@@ -176,8 +176,8 @@ func TestCreateReadUpdateDelete(t *testing.T) {
 	if out["createdAt"].StringValue() != "2026-01-01T00:00:00Z" {
 		t.Errorf("read-only output missing: %v", out)
 	}
-	if out["psk"].StringValue() != "s3cret" {
-		t.Errorf("a declared, not-returned secret keeps its input value: %v", out["psk"])
+	if !out["psk"].IsSecret() || out["psk"].SecretValue().Element.StringValue() != "s3cret" {
+		t.Errorf("a declared, not-returned secret keeps its input value, as a secret: %v", out["psk"])
 	}
 	if _, ok := out["extra"]; ok {
 		t.Error("unmodelled fields are not outputs")
@@ -199,8 +199,11 @@ func TestCreateReadUpdateDelete(t *testing.T) {
 	if _, ok := r.Inputs["tags"]; ok {
 		t.Error("an unmanaged field must not enter the inputs")
 	}
-	if r.Inputs["psk"].StringValue() != "s3cret" {
-		t.Error("a not-returned managed secret keeps its old input")
+	if !r.Inputs["psk"].IsSecret() || r.Inputs["psk"].SecretValue().Element.StringValue() != "s3cret" {
+		t.Errorf("a not-returned managed secret keeps its old input, as a secret: %v", r.Inputs["psk"])
+	}
+	if !r.Outputs["psk"].IsSecret() {
+		t.Errorf("a declared secret output stays a secret: %v", r.Outputs["psk"])
 	}
 	if d, _ := e.Diff(k, r.Inputs, in); strings.Join(d.Changed, ",") != "mode" {
 		t.Errorf("after refresh only the drifted path diffs: %v", d.Changed)
@@ -376,5 +379,58 @@ func TestMergeBodyLeafReplacesSubtree(t *testing.T) {
 	// A dropped path with no default cannot be merged.
 	if _, err := engine.MergeBody(k, live, map[string]any{"name": "x", "rate_kbps": 1}, map[string]any{"name": "x"}); err == nil {
 		t.Error("want a G-Q1 error")
+	}
+}
+
+// A declared {} for an object manages no path: update keeps the live
+// object's unmanaged subfields (rule 2), and a refresh neither adopts them
+// nor makes the next check fail G-Q1.
+func TestEmptyObjectIsAContainer(t *testing.T) {
+	ctx := context.Background()
+	e, srv := setup(t)
+	k := e.Surface.Find(fakectl.ThingToken)
+	in := pm(map[string]any{"name": "e1", "window": map[string]any{"mode": "CUSTOM", "start": "08:00", "end": "17:00"}})
+	id, _, err := e.Create(ctx, k, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.TrimPrefix(id, "private:")
+	if got := engine.LeafPaths(k, map[string]any{"name": "x", "window": map[string]any{}}); len(got) != 1 || got[0].String() != "name" {
+		t.Errorf("leaf paths of a declared {}: %v", got)
+	}
+
+	// Update from a program that declares window: {} (olds manage nothing in
+	// window either, so nothing is dropped).
+	olds := pm(map[string]any{"name": "e1", "window": map[string]any{}})
+	news := pm(map[string]any{"name": "e1", "window": map[string]any{}})
+	if _, err := e.Update(ctx, k, id, olds, news); err != nil {
+		t.Fatal(err)
+	}
+	w := srv.Object("things", raw)["window"].(map[string]any)
+	if w["mode"] != "CUSTOM" || w["start"] != "08:00" || w["end"] != "17:00" {
+		t.Errorf("a declared {} must keep the live subfields: %v", w)
+	}
+
+	// Refresh, then check and diff the same program.
+	r, err := e.Read(ctx, k, id, news, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rw, ok := r.Inputs["window"]
+	if !ok || !rw.IsObject() || len(rw.ObjectValue()) != 0 {
+		t.Errorf("refresh must keep window as a declared {} without adopting subfields: %v", r.Inputs)
+	}
+	for _, f := range e.Check(k, r.Inputs, news) {
+		if strings.Contains(f.Reason, "G-Q1") {
+			t.Errorf("check after refresh: %s: %s", f.Property, f.Reason)
+		}
+	}
+	if d, err := e.Diff(k, r.Inputs, news); err != nil || len(d.Changed) != 0 {
+		t.Errorf("diff after refresh: %v %v", d.Changed, err)
+	}
+
+	// Going from managed subfields to {} drops them (G-Q1 applies).
+	if got := engine.Dropped(k, map[string]any{"window": map[string]any{"start": "1"}}, map[string]any{"window": map[string]any{}}); len(got) != 1 || got[0].String() != "window.start" {
+		t.Errorf("dropped under a declared {}: %v", got)
 	}
 }

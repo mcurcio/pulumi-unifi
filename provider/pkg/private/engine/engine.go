@@ -530,6 +530,19 @@ func (e *Engine) Read(ctx context.Context, k *Kind, id string, oldInputs resourc
 		// else: absent on the controller, so it drops out of the inputs and
 		// the next diff shows it (rule 1: every managed path round-trips).
 	}
+	// A declared object container (a {} included) stays declared while the
+	// controller still returns that object, so the refreshed inputs keep the
+	// program's shape without adopting the object's unmanaged subfields.
+	for _, p := range ObjectPaths(k, ow) {
+		if _, ok := Get(proj, p); ok {
+			continue
+		}
+		if lv, ok := Get(live, p); ok {
+			if _, isObj := lv.(map[string]any); isObj {
+				Set(proj, p, map[string]any{})
+			}
+		}
+	}
 	res.Inputs = FromWire(k, proj, nil)
 	res.Outputs = e.outputs(k, live, ow)
 	return res, nil
