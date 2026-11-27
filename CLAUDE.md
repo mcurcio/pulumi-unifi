@@ -23,7 +23,9 @@ modify the separate `iac` repo** — consuming the SDK there is a later, separat
 A standalone, regenerable, native **Pulumi provider** for Ubiquiti's official **UniFi Network
 Integration API** (`/proxy/network/integration/v1/...`, `X-API-KEY` auth), code-generated from
 [beezly/unifi-apis](https://github.com/beezly/unifi-apis) OpenAPI 3.1 specs. Targets the documented
-official API only — not the legacy private controller API or terraform-bridge.
+official API by default, plus an **opt-in private-API binding** (`unifi:network:*` kinds) built
+locally with `PRIVATE=1` from the pinned UniFi OS Server installer and not published (see
+`docs/design/private-binding.md`). Not terraform-bridge.
 
 ## Codegen pipeline
 
@@ -42,8 +44,11 @@ beezly spec (pinned SHA, fetched at build by openapi/fetch.sh — gitignored)
 
 **Nothing generated or fetched is committed.** The pinned spec, `schema.json`, `metadata.json`,
 `openapi_generated.yml`, and `sdk/python/` are all build artifacts (gitignored). `make build` and
-`make test` fetch + regenerate them on demand; the plugin `//go:embed`s the three generated files at
-compile time. Only source is tracked: the pin manifest (`openapi/SOURCE` + `fetch.sh`), codegen Go,
+`make test` fetch + regenerate them on demand; the plugin `//go:embed`s five generated files at
+compile time: `schema.json`, `metadata.json`, `openapi_generated.yml` (the framework's inputs) plus
+`schema.merged.json` (what GetSchema serves) and `private.json` (the private kinds the engine serves).
+At `PRIVATE=0` `schema.merged.json` is byte-equal to the golden (`TestNoModelIsGolden`) and
+`private.json` serves no kinds. Only source is tracked: the pin manifest (`openapi/SOURCE` + `fetch.sh`), codegen Go,
 provider glue, and `ExcludedPaths`/fixes.
 
 Toolchain roles:
@@ -103,7 +108,7 @@ Prereqs: Go 1.26, Pulumi CLI, Python 3 + venv, network access to GitHub (build f
 spec), Docker (Compose v2) for the mock/e2e tiers, and for live testing a reachable **UniFi OS
 Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
 
-## Tests (two tiers)
+## Tests (three tiers)
 
 - **Tier 1 — `make test`** (no Docker): codegen determinism, spec sanitization, `FixOpenAPIDoc`, provider
   callbacks. Default gate. **`make test-mock`** (Docker): reads a data source and dispatches

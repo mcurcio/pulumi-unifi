@@ -71,9 +71,14 @@ beezly spec (pinned commit SHA + controller version)
 
 The pipeline is **deterministic**: same pinned spec + same fixes/exclusions → identical
 `schema.json`, `metadata.json`, and SDK. Every generated/fetched output is a **gitignored build
-artifact** (the spec, the three codegen outputs, and `sdk/python`) — `make build`/`make generate`
-fetch + regenerate them on demand and the plugin `//go:embed`s the three codegen outputs at compile
-time. Regeneration is driven by bumping the pinned spec version. (Determinism required one fix: every
+artifact** (the spec, the codegen outputs, and `sdk/python`) — `make build`/`make generate`
+fetch + regenerate them on demand and the plugin `//go:embed`s five generated files at compile
+time: the three framework inputs (`schema.json`, `metadata.json`, `openapi_generated.yml`) plus
+`schema.merged.json`, which GetSchema serves, and `private.json`, the private-API kinds the
+dispatcher serves. At `PRIVATE=0` (the default) `schema.merged.json` is byte-equal to the
+`schema.json` golden (guarded by `TestNoModelIsGolden`) and `private.json` serves no kinds; a
+`PRIVATE=1` surface sits outside the frozen contract (see
+[design/private-binding.md](design/private-binding.md) §5 and §9). Regeneration is driven by bumping the pinned spec version. (Determinism required one fix: every
 component schema is given a unique title so discriminated-getter names don't collapse — see
 `ensureSchemaTitles`.)
 
