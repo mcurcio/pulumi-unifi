@@ -286,3 +286,22 @@ natural key worked, and `destroy` left no objects.
 | 25 | §11 `private-check` | It also runs `provider/pkg/private/gen` `TestPrivateSurfaceGolden`: the `schema.merged.json` and `private.json` digests, `tokens.txt`, the private surface lint (token grammar, golden entries unchanged, property names, secret-looking names flagged, schema and kind table agree, Pulumi `ImportSpec` binds) and two-run determinism | Completes step-1 deviation 9 |
 | 26 | §11 step 3 (Boot) | **Live finding:** the image's Network app requires a **version-5** `UOS_UUID`. A v4 UUID from `/proc/sys/kernel/random/uuid` (the research recipe) fails its `systemService` bean with "Invalid uuid version - 4", and `:8081` never opens. The smoke run used `uuid5(NAMESPACE_DNS, "pulumi-unifi-e2e-private")` | Step 3's `run.sh` must generate a v5 UUID |
 | 27 | §2 `test/e2e-private/fwd` | Committed in step 2 (used by the smoke run) | — |
+
+### Step 3: the live e2e tier (built and run green)
+
+**Measured result.** `make test-e2e-private` (`test/e2e-private/run.sh`) builds the `PRIVATE=1`
+plugin and Python SDK from the pinned installer, `docker load`s the same installer's image, boots it
+fresh with no wizard and no key, and drives the Pulumi CLI 3.230.0 through `e2e_test.go`. All 6 steps
+of §11 step 7 pass on all 4 kinds: create, refresh + no-op preview + a second no-op `up`, an update
+that keeps unmanaged fields and resets dropped ones, managed drift shown as exactly one property diff,
+import by natural key into a fresh stack with a no-op preview, and destroy with nothing left.
+
+| # | Design said | Implementation | Why |
+|---|---|---|---|
+| 28 | §8 Import: "Managed paths after import = natural key + the import's `properties`" | **Live finding:** Pulumi 3.230.0 does not pass an import's `properties` to the provider, nor narrow the stored inputs to them. With every writable field returned as inputs, an imported ApGroup carried `externalId` and `forWlanconf`, and a program that left them out failed Check (G-Q1: dropped, no default). Now an import adopts the **natural key plus the required fields** (nested: required within required). `Engine.DiffLive` (the dispatcher passes the old outputs) treats a path the new inputs start to manage as no change when its value equals what the controller returned, so a program that declares more than the import adopted, at the live values, previews clean | Rule 3 must work with the CLI as it is. Adopting a field at its live value changes nothing (rule 1). Tier-1: `TestImportByNaturalKey` |
+| 29 | §10 ApGroup | The e2e updates ApGroup by renaming it (its natural key; an in-place update). `device_macs` stays `[]` | **Live finding:** the controller rejects MACs of devices it has not adopted (`api.err.InvalidDeviceInApGroup`), and `for_wlanconf: true` needs devices (`api.err.ApGroupForWlanMustHaveDevices`). A fresh controller has no devices |
+| 30 | §11 step 6: `go test ./test/e2e-private/...` | `test/e2e-private` is its own Go module (standard library only; it also holds `fwd/`). `run.sh` runs `go test -tags e2e_private .` there | The provider module, `make test` and `go vet ./...` never see this tier |
+| 31 | §11 step 2: load and tag `uosserver:<pin>` | The tag is `uosserver:uos-<version>-<sha256[:12]>`. The load is skipped when that tag exists (`E2E_RELOAD=1` forces it). `image.tar` is written into the cache by `uos-extract -image-out` when it is missing | The tag is only ever made by `run.sh` from the pinned installer's own `image.tar`, so it names the pin. Saves a reload of 865 MB on every run |
+| 32 | §11 step 7 (4): "`preview` shows exactly that diff" | `preview --refresh --json`: exactly one change, an `update` of that resource whose `detailedDiff` holds only that property. Then `up --refresh` restores it | A plain `preview` does not read the controller, so it cannot see the drift |
+| 33 | §11 step 7 (3) | The unmanaged fields changed by raw PUT are QosRule `enabled` and `download_burst` and FirewallAppBlock `client_macs`. The dropped fields are QosRule `destination.port_matching_type` (back to `ANY`, the model default) and `destination.port` (an `Optional`, cleared). Every kind changes a managed field. `kinds.yaml` `defaults:` stays empty: none was needed | These are the fields a fresh controller accepts without devices or set-up |
+| 34 | §11 step 7 (5): import one object | Three: ApGroup by bare key, NetworkMembersGroup by `name=…`, FirewallAppBlock with no `properties`. A missing key must fail with the zero-match error | Covers both key forms and the DiffLive path |

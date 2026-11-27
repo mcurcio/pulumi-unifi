@@ -116,6 +116,10 @@ Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
   authenticated CRUD round-trip + live read. The one-time bake (`make e2e-bootstrap`) needs a manual
   first-run wizard + key mint (no headless API); thereafter every run is deterministic. See
   `test/e2e/README.md`.
+- **Private tier — `make test-e2e-private`** (privileged Docker + the pinned installer; OFFLINE/local):
+  builds the `PRIVATE=1` plugin + SDK, boots UniFi OS Server from the **same pinned installer's** image
+  (no wizard, no key, no `hieutq`), and drives the Pulumi CLI through create/read/no-op/update/drift/
+  import/destroy for the 4 `unifi:network:*` kinds. See `test/e2e-private/README.md`.
 
 ## Gotchas
 
