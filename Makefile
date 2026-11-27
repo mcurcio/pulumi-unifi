@@ -39,7 +39,7 @@ BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: uos-fetch uos-model private-check uos-parity ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
+.PHONY: uos-fetch uos-model private-check uos-parity test-e2e-private ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
 
 DOCSVENV     := $(WORKING_DIR)/.docsvenv
 
@@ -231,6 +231,16 @@ private-check:: $(UOS_MODEL)
 #   UOS_ORACLE_ROUTES=<routes.tsv> UOS_ORACLE_CRUD=<crud.json> make uos-parity
 uos-parity:: $(UOS_INSTALLER_FILE)
 	cd provider && UOS_INSTALLER=$(UOS_INSTALLER_FILE) go test -tags uosoracle -count=1 -v -run 'TestParity' ./pkg/uos/
+
+# Private-API live e2e (OFFLINE / local — needs a privileged Docker and the
+# pinned installer; NOT stock CI). test/e2e-private/run.sh builds the PRIVATE=1
+# plugin + Python SDK, boots UniFi OS Server from the SAME pinned installer's
+# image (no wizard, no key), and drives the Pulumi CLI through create, read,
+# no-op, update, drift, import and destroy for the 4 private kinds. Set
+# PULUMI=<cli> for the pinned CLI and UOS_INSTALLER=<path> to reuse a local
+# installer. See test/e2e-private/README.md.
+test-e2e-private::
+	./test/e2e-private/run.sh
 
 # --- Documentation (MkDocs Material + mike) ---------------------------------
 # The docs are fully isolated from the Go build and the SDK venv: an auto-

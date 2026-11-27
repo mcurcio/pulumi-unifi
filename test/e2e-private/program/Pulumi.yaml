@@ -1,0 +1,3 @@
+name: unifi-e2e-private
+description: Private-API e2e program (test/e2e-private, docs/design/private-binding.md §11).
+runtime: python
