@@ -12,7 +12,7 @@
 # Prototype: parses `javap` text. Needs a JDK `javap` on PATH.
 import json, os, re, subprocess, sys
 
-CP, ROUTES = sys.argv[1], sys.argv[2]
+CP, ROUTES = (sys.argv[1], sys.argv[2]) if __name__ == '__main__' else (None, None)
 ENV = dict(os.environ, JAVA_TOOL_OPTIONS='', _JAVA_OPTIONS='')
 _cache = {}
 
@@ -31,7 +31,13 @@ def code_of(cls, sig_name):
     m = re.search(r'\n  [^\n]* ' + re.escape(sig_name) + r'\(\);\n    Code:\n(.*?)(?=\n\n|\n}\n)', c, re.S)
     return m.group(1) if m else ''
 
-ROUTE_TABLE = [l.rstrip('\n').split('\t') for l in open(ROUTES)]
+ROUTE_TABLE = []
+
+def init(classes_dir, routes_tsv):
+    """For use as a module: point at a classes dir and a routes.py table."""
+    global CP, ROUTE_TABLE
+    CP = classes_dir
+    ROUTE_TABLE[:] = [l.rstrip('\n').split('\t') for l in open(routes_tsv)]
 
 # ---------- enums ----------
 _enums = {}
@@ -40,7 +46,14 @@ def enum_info(cls):
     if cls in _enums:
         return _enums[cls]
     v, c = jp(cls), jp(cls, '-c')
-    json_value = 'annotation.JsonValue' in v
+    # Which value does @JsonValue serialize? Follow the annotated method: name() -> the constant's
+    # name; getfield -> the extra constructor string. (Lowercase aliases are often parse-only.)
+    json_value = False
+    for sig, body in members(v):
+        mm = re.match(r'public [\w.$]+ (\w+)\(\);$', sig)
+        if mm and 'annotation.JsonValue' in body:
+            code = code_of(cls, mm.group(1))
+            json_value = 'getfield' in code and 'Method name:()' not in code
     fprops = {}
     for sig, body in members(v):
         m = re.search(r'static final [\w.$]+ (\w+);$', sig)
@@ -142,21 +155,20 @@ def model(t, depth=0, seen=frozenset()):
         m = re.match(r'(?:public |protected |abstract |default |static |final |synchronized )*([\w.$<>, \[\]?]+) (\w+)\(\);$', sig)
         if not jpv or not m or re.search(r'annotation\.JsonIgnore(\n|\(\s*value=true)', body):
             continue
-        f = model(m.group(1), depth + 1, seen)
-        if re.search(r'constraints\.(NotNull|NotBlank|NotEmpty)\b', body):
-            f['required'] = True
+        f = annotate(model(m.group(1), depth + 1, seen), body)
         if 'Value$Default' in body:
             f['default'] = default_of(base, m.group(2))
-        if 'Access;.READ_ONLY' in body:
-            f['readOnly'] = True
-        if 'Access;.WRITE_ONLY' in body:
-            f['writeOnly'] = True
-        for cn, a in re.findall(r'(?:validation\.constraints|hibernate\.validator\.constraints)\.(\w+)\((.*?)\n\s+\)', body, re.S):
-            if cn not in ('NotNull', 'NotBlank', 'NotEmpty'):
-                f.setdefault('constraints', {})[cn] = re.sub(r'\s+', ' ', a).strip()
         out['fields'][jpv.group(1)] = f
-    if not out['fields']:
-        pojo_fields(base, out['fields'], depth, seen)
+    pojo = {}
+    pojo_fields(base, pojo, depth, seen)   # field-level annotations, even when getters also carry @JsonProperty
+    for k, f in pojo.items():
+        if k not in out['fields']:
+            out['fields'][k] = f
+        else:
+            g = out['fields'][k]
+            for flag in ('required', 'readOnly', 'writeOnly'):
+                if f.get(flag): g[flag] = True
+            if f.get('constraints'): g['constraints'] = {**f['constraints'], **g.get('constraints', {})}
     if subs:
         out['variants'] = {n: model(c.replace('/', '.'), depth + 1, seen) for c, n in subs}
         d = out.get('discriminator')
@@ -175,7 +187,25 @@ def annotate(f, body):
     for cn, a in re.findall(r'(?:validation\.constraints|hibernate\.validator\.constraints)\.(\w+)\((.*?)\n\s+\)', body, re.S):
         if cn not in ('NotNull', 'NotBlank', 'NotEmpty'):
             f.setdefault('constraints', {})[cn] = re.sub(r'\s+', ' ', a).strip()
+    for cn in re.findall(r'validation\.constraints\.(NotEmpty|NotBlank)\b', body):
+        f.setdefault('constraints', {})[cn] = ''
+    for ann in set(re.findall(r'\n\s+(com\.ubnt[\w.$]+)(?:\(|\n)', body)):
+        msg = custom_constraint(ann)
+        if msg:
+            f.setdefault('constraints', {})['custom'] = msg
     return f
+
+_custom = {}
+def custom_constraint(ann):
+    """A project annotation meta-annotated with @jakarta.validation.Constraint: return its message."""
+    if ann not in _custom:
+        t = jp(ann)
+        msg = None
+        if 'jakarta.validation.Constraint(' in t or 'jakarta/validation/Constraint;' in t:
+            m = re.search(r'java\.lang\.String message\(\);.*?AnnotationDefault:\s*\n\s*default_value: s#\d+\s*\n\s*"([^"]*)"', t, re.S)
+            msg = m.group(1) if m else 'custom constraint ' + ann.rsplit('.', 1)[-1]
+        _custom[ann] = msg
+    return _custom[ann]
 
 def pojo_fields(cls, out, depth, seen):
     """Lombok/POJO style: instance fields keep their real names; Jackson uses them (or @JsonProperty)
@@ -190,7 +220,8 @@ def pojo_fields(cls, out, depth, seen):
         if not m or ' static ' in ' ' + sig:
             continue
         name = m.group(2)
-        if 'get' + name[:1].upper() + name[1:] not in getters and 'is' + name[:1].upper() + name[1:] not in getters:
+        has_getter = ('get' + name[:1].upper() + name[1:]) in getters or ('is' + name[:1].upper() + name[1:]) in getters
+        if not has_getter and 'JsonProperty(' not in body:   # obfuscated getters: trust @JsonProperty
             continue
         if re.search(r'annotation\.JsonIgnore(\n|\(\s*value=true)', body):
             continue
@@ -286,7 +317,9 @@ def crud(prefix):
         })
     return kinds
 
-if sys.argv[3] == '--crud':
-    print(json.dumps(crud(sys.argv[4] if len(sys.argv) > 4 else '/api/site/{siteName}/'), indent=1))
-else:
-    print(json.dumps(route_model(sys.argv[3], sys.argv[4]), indent=1))
+if __name__ == '__main__':
+    init(CP, ROUTES)
+    if sys.argv[3] == '--crud':
+        print(json.dumps(crud(sys.argv[4] if len(sys.argv) > 4 else '/api/site/{siteName}/'), indent=1))
+    else:
+        print(json.dumps(route_model(sys.argv[3], sys.argv[4]), indent=1))
