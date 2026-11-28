@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	pbempty "github.com/golang/protobuf/ptypes/empty"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
@@ -22,7 +20,6 @@ import (
 	core "github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/binding"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/provider"
 )
 
 // Config keys and environment fallbacks the dispatcher reads (design §7).
@@ -50,6 +47,10 @@ type Dispatcher struct {
 	surface *engine.Surface
 	client  *binding.Client
 	engine  *engine.Engine
+	// ctl is the controller access shared by the private binding and the
+	// official singletons' binding.
+	ctl   *controller.Client
+	guard *versionGuard
 
 	// ordering serves the official singletons (surface.Singletons) through
 	// the official binding; its binding is built in Configure.
@@ -68,17 +69,36 @@ func NewDispatcher(fw pulumirpc.ResourceProviderServer, name string, mergedSchem
 	if err != nil {
 		return nil, err
 	}
-	c := &binding.Client{Site: "default", HTTP: &http.Client{Timeout: 60 * time.Second}}
+	c := &binding.Client{Site: "default"}
 	d := &Dispatcher{
-		ResourceProviderServer: fw, name: name, schema: mergedSchema, surface: s,
-		client: c, engine: &engine.Engine{Surface: s, Binding: c},
+		ResourceProviderServer: fw, name: name, schema: mergedSchema, surface: s, client: c,
 	}
+	d.guard = &versionGuard{Binding: c, want: s.Source.NetworkVersion, read: c.NetworkVersion}
+	d.engine = &engine.Engine{Surface: s, Binding: d.guard}
+	d.configureClients(controller.Config{}, "default")
 	d.ordering = &core.Ordering{
-		Binding: official.New(controller.New(controller.Config{})),
+		Binding: official.New(d.ctl),
 		Site:    func() string { return d.client.Site },
 		Warn:    func(msg string) { logging.Warningf("%s", msg) },
 	}
 	return d, nil
+}
+
+// configureClients builds the one controller client every engine-served kind
+// shares (TLS policy, X-API-Key, 429 retry; docs/design/private-binding.md
+// §S2.2 L1, §S2.6) and points the private binding at its Network root: the
+// authenticated edge https://<apiHost>/proxy/network by default, or the
+// networkBaseUrl override.
+func (d *Dispatcher) configureClients(cfg controller.Config, site string) {
+	d.ctl = controller.New(cfg)
+	root, err := d.ctl.NetworkRoot()
+	if err != nil {
+		root = "" // the binding reports what to set on the first call
+	}
+	d.client.BaseURL = root
+	d.client.Site = site
+	d.client.Ctl = d.ctl
+	d.client.Sites = &controller.SiteResolver{C: d.ctl}
 }
 
 // singleton returns the official singleton the URN's type names, or nil.
@@ -167,21 +187,13 @@ func (d *Dispatcher) Configure(ctx context.Context, req *pulumirpc.ConfigureRequ
 	if site == "" {
 		site = "default"
 	}
-	base := get(keyBaseURL)
-	if base == "" {
-		if host := get("apiHost"); host != "" {
-			base = "https://" + host + "/proxy/network"
-		}
-	}
 	insecure, _ := strconv.ParseBool(get("allowInsecure"))
-	d.ordering.Binding = official.New(controller.New(controller.Config{
-		APIHost: get("apiHost"), APIKey: apiKey, AllowInsecure: insecure}))
-	d.client.BaseURL = strings.TrimRight(base, "/")
-	d.client.Site = site
-	d.client.APIKey = apiKey
-	if insecure {
-		d.client.HTTP.Transport = provider.InsecureTransport()
-	}
+	d.configureClients(controller.Config{APIHost: get("apiHost"), APIKey: apiKey, AllowInsecure: insecure,
+		NetworkBaseURL: get(keyBaseURL)}, site)
+	d.ordering.Binding = official.New(d.ctl)
+	d.guard.mu.Lock()
+	d.guard.done, d.guard.result = false, nil
+	d.guard.mu.Unlock()
 	if len(d.surface.Kinds) > 0 {
 		logging.V(3).Infof("private API: %d kinds, built for Network %s; base %q, site %q, api key set: %v",
 			len(d.surface.Kinds), d.surface.Source.NetworkVersion, d.client.BaseURL, site, apiKey != "")

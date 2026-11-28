@@ -23,10 +23,18 @@ import (
 // spec paths (/v1/...) are relative to it.
 const IntegrationBasePath = "/proxy/network/integration"
 
+// NetworkBasePath is where the edge serves the Network application itself:
+// the private v2 (/v2/api/site/{name}/...) and classic (/api/s/{name}/...)
+// APIs (docs/design/private-binding.md §S2.6).
+const NetworkBasePath = "/proxy/network"
+
 // Client calls one controller. The zero value is not usable; use New.
 type Client struct {
 	// Host is apiHost: a bare host[:port] reached over https.
 	Host string
+	// networkBase overrides the Network root (networkBaseUrl: the Network app
+	// reached directly, e.g. http://127.0.0.1:8081 before the wizard).
+	networkBase string
 	// apiKey is sent as X-API-Key. Never logged, never in an error.
 	apiKey string
 	http   *http.Client
@@ -41,6 +49,9 @@ type Config struct {
 	APIHost       string
 	APIKey        string
 	AllowInsecure bool
+	// NetworkBaseURL overrides the Network root (the networkBaseUrl config
+	// key); empty means the edge, https://<APIHost>/proxy/network.
+	NetworkBaseURL string
 	// Transport overrides the TLS policy (tests); nil uses the default.
 	Transport http.RoundTripper
 }
@@ -53,7 +64,7 @@ func New(c Config) *Client {
 	if rt == nil {
 		rt = transport(c.AllowInsecure)
 	}
-	return &Client{Host: c.APIHost, apiKey: c.APIKey, http: &http.Client{Timeout: 60 * time.Second, Transport: rt},
+	return &Client{Host: c.APIHost, networkBase: strings.TrimRight(c.NetworkBaseURL, "/"), apiKey: c.APIKey, http: &http.Client{Timeout: 60 * time.Second, Transport: rt},
 		Sleep: time.Sleep, MaxRetries: 3}
 }
 
@@ -84,6 +95,19 @@ func (c *Client) IntegrationRoot() (string, error) {
 	return "https://" + c.Host + IntegrationBasePath, nil
 }
 
+// NetworkRoot is the Network application root the private bindings append
+// their API paths to: the networkBaseUrl override, else the edge,
+// https://<apiHost>/proxy/network.
+func (c *Client) NetworkRoot() (string, error) {
+	if c.networkBase != "" {
+		return c.networkBase, nil
+	}
+	if c.Host == "" {
+		return "", fmt.Errorf("the Network application is not reachable: set unifi:apiHost (the edge, https://<apiHost>/proxy/network) or unifi:networkBaseUrl")
+	}
+	return "https://" + c.Host + NetworkBasePath, nil
+}
+
 // Error is a non-2xx answer: the status and a short server message (never an
 // HTML page, never the request headers).
 type Error struct {
@@ -103,22 +127,28 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s %s: HTTP %d: %s", e.Method, e.URL, e.Status, msg)
 }
 
-// Do sends one JSON request and decodes a JSON answer into out (when out is
-// non-nil and the body is non-empty). A 429 is retried up to MaxRetries times,
-// honouring Retry-After (seconds, capped at 30 s).
-func (c *Client) Do(ctx context.Context, method, url string, body, out any) error {
+// Send sends one request and returns the status and body of the answer,
+// whatever the status: the caller maps statuses to outcomes. It sets the
+// X-API-Key header when a key is configured, and retries a 429 up to
+// MaxRetries times, honouring Retry-After (seconds, capped at 30 s). Only a
+// transport failure is an error; it never carries the key.
+func (c *Client) Send(ctx context.Context, method, url string, body any) (int, []byte, error) {
 	var payload []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return 0, nil, err
 		}
 		payload = b
 	}
 	for attempt := 0; ; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(payload))
+		var rd io.Reader
+		if payload != nil {
+			rd = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, url, rd)
 		if err != nil {
-			return err
+			return 0, nil, err
 		}
 		req.Header.Set("Accept", "application/json")
 		if body != nil {
@@ -129,28 +159,39 @@ func (c *Client) Do(ctx context.Context, method, url string, body, out any) erro
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
-			return fmt.Errorf("%s %s: %w", method, url, err)
+			return 0, nil, fmt.Errorf("%s %s: %w", method, url, err)
 		}
-		raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+		raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 		resp.Body.Close()
 		if rerr != nil {
-			return fmt.Errorf("%s %s: reading the response: %w", method, url, rerr)
+			return resp.StatusCode, nil, fmt.Errorf("%s %s: reading the response: %w", method, url, rerr)
 		}
 		if resp.StatusCode == http.StatusTooManyRequests && attempt < c.MaxRetries {
 			c.Sleep(retryAfter(resp.Header.Get("Retry-After"), attempt))
 			continue
 		}
-		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return newError(method, url, resp.StatusCode, raw)
-		}
-		if out == nil || len(bytes.TrimSpace(raw)) == 0 {
-			return nil
-		}
-		if err := json.Unmarshal(raw, out); err != nil {
-			return fmt.Errorf("%s %s: decoding the response: %w", method, url, err)
-		}
+		return resp.StatusCode, raw, nil
+	}
+}
+
+// Do sends one JSON request (through Send) and decodes a JSON answer into out
+// (when out is non-nil and the body is non-empty). A non-2xx answer is an
+// *Error.
+func (c *Client) Do(ctx context.Context, method, url string, body, out any) error {
+	status, raw, err := c.Send(ctx, method, url, body)
+	if err != nil {
+		return err
+	}
+	if status < 200 || status > 299 {
+		return newError(method, url, status, raw)
+	}
+	if out == nil || len(bytes.TrimSpace(raw)) == 0 {
 		return nil
 	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("%s %s: decoding the response: %w", method, url, err)
+	}
+	return nil
 }
 
 func retryAfter(h string, attempt int) time.Duration {

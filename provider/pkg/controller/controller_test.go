@@ -110,3 +110,67 @@ func TestSiteResolver(t *testing.T) {
 		t.Errorf("unknown site: %v (want the known names listed)", err)
 	}
 }
+
+// The Network root: the networkBaseUrl override, else the edge on apiHost,
+// else an error that names both settings.
+func TestNetworkRoot(t *testing.T) {
+	if r, err := New(Config{APIHost: "192.0.2.1"}).NetworkRoot(); err != nil || r != "https://192.0.2.1/proxy/network" {
+		t.Errorf("edge root %q %v", r, err)
+	}
+	if r, err := New(Config{APIHost: "192.0.2.1", NetworkBaseURL: "http://127.0.0.1:8081/"}).NetworkRoot(); err != nil || r != "http://127.0.0.1:8081" {
+		t.Errorf("override root %q %v", r, err)
+	}
+	if _, err := New(Config{}).NetworkRoot(); err == nil || !strings.Contains(err.Error(), "apiHost") || !strings.Contains(err.Error(), "networkBaseUrl") {
+		t.Errorf("no root: %v", err)
+	}
+}
+
+// Send hands any status back to the caller (only a transport failure is an
+// error), with the key header set.
+func TestSendReturnsStatus(t *testing.T) {
+	c, srv := tlsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != "k" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"meta":{"rc":"error"}}`))
+	}, "k")
+	code, raw, err := c.Send(context.Background(), "GET", srv.URL+"/x", nil)
+	if err != nil || code != http.StatusNotFound || !strings.Contains(string(raw), "rc") {
+		t.Errorf("Send = %d %s %v", code, raw, err)
+	}
+}
+
+// Name: a site name costs no call; a UUID is resolved once and cached; with
+// no key a UUID is returned as given.
+func TestSiteResolverName(t *testing.T) {
+	calls := 0
+	c, _ := tlsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"data":[{"id":"88F7AF54-98F8-306A-A1C7-C9349722B1F6","internalReference":"default","name":"Default"}]}`))
+	}, "k")
+	r := &SiteResolver{C: c}
+	ctx := context.Background()
+	if n, err := r.Name(ctx, "default"); err != nil || n != "default" || calls != 0 {
+		t.Errorf("name: %q %v (%d calls)", n, err, calls)
+	}
+	for i := 0; i < 2; i++ {
+		if n, err := r.Name(ctx, "88f7af54-98f8-306a-a1c7-c9349722b1f6"); err != nil || n != "default" {
+			t.Errorf("uuid: %q %v", n, err)
+		}
+	}
+	if id, err := r.UUID(ctx, "Default"); err != nil || id != "88f7af54-98f8-306a-a1c7-c9349722b1f6" {
+		t.Errorf("UUID by display name: %q %v", id, err)
+	}
+	if calls != 1 {
+		t.Errorf("%d site lookups, want 1 (cached)", calls)
+	}
+	if _, err := r.Name(ctx, "00000000-0000-0000-0000-000000000000"); err == nil {
+		t.Error("an unknown UUID must fail")
+	}
+	nokey := &SiteResolver{C: New(Config{APIHost: c.Host})}
+	if n, err := nokey.Name(ctx, "88f7af54-98f8-306a-a1c7-c9349722b1f6"); err != nil || n != "88f7af54-98f8-306a-a1c7-c9349722b1f6" {
+		t.Errorf("no key: %q %v", n, err)
+	}
+}

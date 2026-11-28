@@ -37,6 +37,12 @@ type Request struct {
 type Server struct {
 	*httptest.Server
 	Site string
+	// NetworkVersion is what classic stat/sysinfo reports (default
+	// "0.0.0-test", the synthetic surface's pin).
+	NetworkVersion string
+	// RequireKey, when set, answers 401 to any request without this
+	// X-API-Key (the authenticated edge after the wizard).
+	RequireKey string
 	mu   sync.Mutex
 	cols map[string]*Coll
 	reqs []Request
@@ -45,7 +51,7 @@ type Server struct {
 // New starts a fake controller serving the collections under
 // /v2/api/site/<site>/.
 func New(site string, cols ...*Coll) *Server {
-	s := &Server{Site: site, cols: map[string]*Coll{}}
+	s := &Server{Site: site, NetworkVersion: "0.0.0-test", cols: map[string]*Coll{}}
 	for _, c := range cols {
 		if c.ListPath == "" {
 			c.ListPath = c.Path
@@ -122,6 +128,15 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(raw, &logged)
 	}
 	s.reqs = append(s.reqs, Request{Method: r.Method, Path: r.URL.Path, APIKey: r.Header.Get("X-API-Key"), Body: logged})
+	if s.RequireKey != "" && r.Header.Get("X-API-Key") != s.RequireKey {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	if r.URL.Path == "/api/s/"+s.Site+"/stat/sysinfo" && r.Method == http.MethodGet {
+		writeJSON(w, http.StatusOK, map[string]any{"meta": map[string]any{"rc": "ok"},
+			"data": []any{map[string]any{"version": s.NetworkVersion}}})
+		return
+	}
 	base := "/v2/api/site/" + s.Site + "/"
 	if !strings.HasPrefix(r.URL.Path, base) {
 		http.NotFound(w, r)

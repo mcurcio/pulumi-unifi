@@ -113,7 +113,7 @@ func TestDispatcherConfigAndRouting(t *testing.T) {
 	if fw.configured != nil {
 		t.Error("the framework must not be configured without an apiKey when private kinds are served")
 	}
-	if d.Client().BaseURL != srv.URL || d.Client().Site != "default" || d.Client().APIKey != "" {
+	if d.Client().BaseURL != srv.URL || d.Client().Site != "default" || d.Client().Ctl.HasKey() {
 		t.Errorf("private client %+v", d.Client())
 	}
 	if _, err := d.Create(ctx, &pulumirpc.CreateRequest{Urn: officialURN}); err == nil || !strings.Contains(err.Error(), "API key is required") {
@@ -205,7 +205,7 @@ func TestDispatcherConfigAndRouting(t *testing.T) {
 	if _, leaked := fw.configured.GetVariables()["unifi:config:networkBaseUrl"]; leaked || fw.configured.GetVariables()["unifi:config:apiKey"] == "" {
 		t.Errorf("framework config %v", fw.configured.GetVariables())
 	}
-	if d.Client().APIKey != "test-key-not-real" || d.Client().Site != "lab" {
+	if !d.Client().Ctl.HasKey() || d.Client().Site != "lab" {
 		t.Errorf("private client %+v", d.Client())
 	}
 	if cr, err := d.Create(ctx, &pulumirpc.CreateRequest{Urn: officialURN}); err != nil || cr.Id != "official-1" {

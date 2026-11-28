@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/controller"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/binding"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/internal/fakectl"
@@ -76,7 +77,7 @@ func TestRequestShapes(t *testing.T) {
 		t.Error("CreateList body must be a list")
 	}
 
-	c.APIKey = "test-key-not-real"
+	c.Ctl = controller.New(controller.Config{APIKey: "test-key-not-real"})
 	if _, err := c.List(ctx, thing); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,7 @@ func TestErrorsKeepTheControllerMessage(t *testing.T) {
 	if !errors.As(err, &he) || he.Status != 400 || !strings.Contains(err.Error(), "name must not be empty") {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := (&binding.Client{Site: "default"}).List(context.Background(), k); err == nil || !strings.Contains(err.Error(), "networkBaseUrl") {
+	if _, err := (&binding.Client{Site: "default"}).List(context.Background(), k); err == nil || !strings.Contains(err.Error(), "networkBaseUrl") || !strings.Contains(err.Error(), "apiHost") {
 		t.Errorf("no base URL: %v", err)
 	}
 }
