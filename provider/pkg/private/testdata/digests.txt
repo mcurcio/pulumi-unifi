@@ -3,4 +3,4 @@
 # reviewed change, refresh with `UPDATE_GOLDEN=1 make private-check`.
 model.json b396e2bb9734b66d4df641998905f75a8586f4f516261a840fa77fb2b8d17f17
 schema.merged.json f25145ead8c9df3de705a6bf33a4ed9387c5fc4495d701f9cc2af8dfb90fc053
-private.json eed26f475b14eae4ea2565d47e67d97c960f0fe6f00c87e6639a1185b03daff5
+surface.json c4768d4f0b611a69cca7dea6610e1376bd31eb8c2c5cbf92a1af0c8d60ec9f21

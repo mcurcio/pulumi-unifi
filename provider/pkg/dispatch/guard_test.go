@@ -1,4 +1,4 @@
-package private
+package dispatch
 
 import (
 	"context"

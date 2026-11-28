@@ -1,24 +1,23 @@
-package private
+package dispatch
 
 import (
 	"context"
 	"fmt"
 	"sync"
 
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 )
 
-// versionGuard is the engine.Binding the dispatcher gives the private engine:
-// the private binding, behind the version guard of
-// docs/design/private-binding.md §S2.6. Before the first private call it reads
-// the controller's Network version and compares it with the version the
-// surface was built for (the pin). A mismatch fails every private kind, with
-// both versions in the message; official kinds never pass through here. A
-// success or a mismatch is cached for the life of the provider; a failure to
+// versionGuard is the version guard of docs/design/private-binding.md §S2.6,
+// shared by the private bindings (v2 and classic) the dispatcher gives the
+// engine (wrap). Before the first private call it reads the controller's
+// Network version and compares it with the version the surface was built for
+// (the pin). A mismatch fails every private kind, with both versions in the
+// message; official kinds never pass through here. A success or a mismatch is
+// cached until the next Configure (which builds a new guard); a failure to
 // read the version (the controller not up yet) is not, so the next call
 // retries.
 type versionGuard struct {
-	engine.Binding
 	// want is the pin's Network version; empty disables the guard (a surface
 	// built without a model serves no private kinds).
 	want string
@@ -65,35 +64,46 @@ func sameVersion(got, want string) bool {
 	return false
 }
 
-func (g *versionGuard) List(ctx context.Context, k *engine.Kind) ([]map[string]any, error) {
+// wrap puts the guard in front of a private binding.
+func (g *versionGuard) wrap(b engine.Binding) engine.Binding { return &guarded{Binding: b, g: g} }
+
+// guarded is a private binding behind the guard; API and SiteID pass through.
+type guarded struct {
+	engine.Binding
+	g *versionGuard
+}
+
+func (g *guarded) check(ctx context.Context) error { return g.g.check(ctx) }
+
+func (g *guarded) List(ctx context.Context, k *engine.Kind) ([]map[string]any, error) {
 	if err := g.check(ctx); err != nil {
 		return nil, err
 	}
 	return g.Binding.List(ctx, k)
 }
 
-func (g *versionGuard) Get(ctx context.Context, k *engine.Kind, id string) (map[string]any, bool, error) {
+func (g *guarded) Get(ctx context.Context, k *engine.Kind, id string) (map[string]any, bool, error) {
 	if err := g.check(ctx); err != nil {
 		return nil, false, err
 	}
 	return g.Binding.Get(ctx, k, id)
 }
 
-func (g *versionGuard) Create(ctx context.Context, k *engine.Kind, body any) (any, error) {
+func (g *guarded) Create(ctx context.Context, k *engine.Kind, body any) (any, error) {
 	if err := g.check(ctx); err != nil {
 		return nil, err
 	}
 	return g.Binding.Create(ctx, k, body)
 }
 
-func (g *versionGuard) Update(ctx context.Context, k *engine.Kind, id string, body map[string]any) (any, error) {
+func (g *guarded) Update(ctx context.Context, k *engine.Kind, id string, body map[string]any) (any, error) {
 	if err := g.check(ctx); err != nil {
 		return nil, err
 	}
 	return g.Binding.Update(ctx, k, id, body)
 }
 
-func (g *versionGuard) Delete(ctx context.Context, k *engine.Kind, id string) (bool, error) {
+func (g *guarded) Delete(ctx context.Context, k *engine.Kind, id string) (bool, error) {
 	if err := g.check(ctx); err != nil {
 		return false, err
 	}

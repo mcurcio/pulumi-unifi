@@ -1,7 +1,8 @@
-package private
+package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -11,7 +12,8 @@ import (
 	pulumirpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/internal/fakectl"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/binding/classic"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/internal/fakectl"
 )
 
 // fakeFramework records what reaches the official side.
@@ -113,8 +115,8 @@ func TestDispatcherConfigAndRouting(t *testing.T) {
 	if fw.configured != nil {
 		t.Error("the framework must not be configured without an apiKey when private kinds are served")
 	}
-	if d.Client().BaseURL != srv.URL || d.Client().Site != "default" || d.Client().Ctl.HasKey() {
-		t.Errorf("private client %+v", d.Client())
+	if d.v2.BaseURL != srv.URL || d.v2.Site != "default" || d.v2.Ctl.HasKey() || *d.classic != v2Conn(d) {
+		t.Errorf("private bindings %+v %+v", d.v2, d.classic)
 	}
 	if _, err := d.Create(ctx, &pulumirpc.CreateRequest{Urn: officialURN}); err == nil || !strings.Contains(err.Error(), "API key is required") {
 		t.Errorf("official call without a key: %v", err)
@@ -205,8 +207,8 @@ func TestDispatcherConfigAndRouting(t *testing.T) {
 	if _, leaked := fw.configured.GetVariables()["unifi:config:networkBaseUrl"]; leaked || fw.configured.GetVariables()["unifi:config:apiKey"] == "" {
 		t.Errorf("framework config %v", fw.configured.GetVariables())
 	}
-	if !d.Client().Ctl.HasKey() || d.Client().Site != "lab" {
-		t.Errorf("private client %+v", d.Client())
+	if !d.v2.Ctl.HasKey() || d.v2.Site != "lab" || *d.classic != v2Conn(d) {
+		t.Errorf("private bindings %+v %+v", d.v2, d.classic)
 	}
 	if cr, err := d.Create(ctx, &pulumirpc.CreateRequest{Urn: officialURN}); err != nil || cr.Id != "official-1" {
 		t.Errorf("official create: %v %v", cr, err)
@@ -221,27 +223,75 @@ func TestDispatcherDefaultBaseURL(t *testing.T) {
 		"unifi:config:apiHost": "192.0.2.1", "unifi:config:apiKey": "k"}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := d.Client().BaseURL; got != "https://192.0.2.1/proxy/network" {
+	if got := d.v2.BaseURL; got != "https://192.0.2.1/proxy/network" {
 		t.Errorf("base URL %s", got)
 	}
 }
 
-// With no private kinds (PRIVATE=0) the dispatcher forwards Configure as is,
-// so a missing apiKey fails exactly as before (in the framework callback).
+// v2Conn is the v2 binding's connection as a classic binding: both private
+// bindings share one controller client, site and resolver.
+func v2Conn(d *Dispatcher) classic.Binding {
+	return classic.Binding{BaseURL: d.v2.BaseURL, Site: d.v2.Site, Ctl: d.v2.Ctl, Sites: d.v2.Sites}
+}
+
+// With no private kinds (PRIVATE=0: an empty surface, or only the official
+// engine-served kinds) the dispatcher forwards Configure as is, so a missing
+// apiKey fails exactly as before (in the framework callback).
 func TestDispatcherNoPrivateKindsForwardsEverything(t *testing.T) {
-	fw := &fakeFramework{}
-	d, err := NewDispatcher(fw, "unifi", []byte(`{}`), []byte(`{"source":{},"kinds":[]}`))
+	for name, surface := range map[string]string{"empty": `{"source":{},"kinds":[]}`, "PRIVATE=0": orderingSurface} {
+		fw := &fakeFramework{}
+		d, err := NewDispatcher(fw, "unifi", []byte(`{}`), []byte(surface))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("UNIFI_APIKEY", "")
+		if _, err := d.Configure(context.Background(), &pulumirpc.ConfigureRequest{Variables: map[string]string{}}); err != nil {
+			t.Fatal(err)
+		}
+		if fw.configured == nil {
+			t.Errorf("%s: Configure not forwarded", name)
+		}
+		if _, err := d.Create(context.Background(), &pulumirpc.CreateRequest{Urn: officialURN}); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if _, err := d.Create(context.Background(), &pulumirpc.CreateRequest{Urn: missingURN}); err == nil || !strings.Contains(err.Error(), "private kinds: []") {
+			t.Errorf("%s: an unserved private token: %v", name, err)
+		}
+	}
+}
+
+// One surface, one engine: the private kinds and the official engine-served
+// kind route to the engine side by side; their stored ids come from their
+// bindings (private:<id>, official:<site id>).
+func TestDispatcherRoutesEveryEngineKindByTheSurface(t *testing.T) {
+	var mixed map[string]any
+	if err := json.Unmarshal(fakectl.SurfaceJSON(), &mixed); err != nil {
+		t.Fatal(err)
+	}
+	var ord map[string]any
+	if err := json.Unmarshal([]byte(orderingSurface), &ord); err != nil {
+		t.Fatal(err)
+	}
+	mixed["kinds"] = append(mixed["kinds"].([]any), ord["kinds"].([]any)...)
+	b, _ := json.Marshal(mixed)
+	d, err := NewDispatcher(&fakeFramework{}, "unifi", []byte(`{}`), b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("UNIFI_APIKEY", "")
-	if _, err := d.Configure(context.Background(), &pulumirpc.ConfigureRequest{Variables: map[string]string{}}); err != nil {
-		t.Fatal(err)
+	for _, tok := range []string{fakectl.ThingToken, fakectl.CrewToken, "unifi:sites/v1:AclRuleOrdering"} {
+		k := d.served("urn:pulumi:dev::proj::" + tok + "::x")
+		if k == nil {
+			t.Fatalf("%s is not routed to the engine", tok)
+		}
+		want := "private:x"
+		if !k.IsPrivate() {
+			want = "official:x"
+		}
+		if got := d.engine.StoredID(k, "x"); got != want {
+			t.Errorf("%s: stored id %s, want %s", tok, got, want)
+		}
 	}
-	if fw.configured == nil {
-		t.Error("Configure not forwarded")
-	}
-	if _, err := d.Create(context.Background(), &pulumirpc.CreateRequest{Urn: officialURN}); err != nil {
-		t.Error(err)
+	if got := d.Surface().PrivateTokens(); len(got) != 5 {
+		t.Errorf("private tokens %v", got)
 	}
 }

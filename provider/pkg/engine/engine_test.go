@@ -7,9 +7,10 @@ import (
 
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
 
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/binding"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/internal/fakectl"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/binding/classic"
+	v2 "github.com/mcurcio/pulumi-unifi/provider/pkg/binding/v2"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/internal/fakectl"
 )
 
 func setup(t *testing.T) (*engine.Engine, *fakectl.Server) {
@@ -17,7 +18,10 @@ func setup(t *testing.T) (*engine.Engine, *fakectl.Server) {
 	srv := fakectl.Start("default")
 	t.Cleanup(srv.Close)
 	s := fakectl.Surface()
-	return &engine.Engine{Surface: s, Binding: &binding.Client{BaseURL: srv.URL, Site: "default"}}, srv
+	return &engine.Engine{Surface: s, Bindings: map[string]engine.Binding{
+		engine.APIV2:      &v2.Binding{BaseURL: srv.URL, Site: "default"},
+		engine.APIClassic: &classic.Binding{BaseURL: srv.URL, Site: "default"},
+	}}, srv
 }
 
 func pm(m map[string]any) resource.PropertyMap { return resource.NewPropertyMapFromMap(m) }
@@ -30,14 +34,48 @@ func failures(fs []engine.Failure) string {
 	return strings.Join(out, "\n")
 }
 
+// The stored-id prefix comes from Binding.API(): the v2 and classic bindings
+// name the private API, so ids already in state (private:<id>) still resolve
+// after the layer move, with no state migration.
 func TestParseID(t *testing.T) {
-	if id, err := engine.ParseID("private:abc"); err != nil || id != "abc" {
-		t.Fatalf("got %q %v", id, err)
-	}
-	for _, bad := range []string{"abc", "official:abc", "mac:aa:bb", "private:"} {
-		if _, err := engine.ParseID(bad); err == nil {
-			t.Errorf("%q: want an error", bad)
+	e, _ := setup(t)
+	for _, tok := range []string{fakectl.ThingToken, fakectl.CrewToken} {
+		k := e.Surface.Find(tok)
+		if id, err := e.ParseID(k, "private:abc"); err != nil || id != "abc" {
+			t.Fatalf("%s: got %q %v", tok, id, err)
 		}
+		if got := e.StoredID(k, "abc"); got != "private:abc" {
+			t.Errorf("%s: StoredID %q", tok, got)
+		}
+		for _, bad := range []string{"abc", "official:abc", "mac:aa:bb", "private:"} {
+			if _, err := e.ParseID(k, bad); err == nil {
+				t.Errorf("%s %q: want an error", tok, bad)
+			}
+		}
+	}
+}
+
+// A stored id written before the layer move (private:<id>, the old constant
+// prefix) reads, updates and deletes through the new bindings unchanged.
+func TestStoredPrivateIDsStillResolve(t *testing.T) {
+	ctx := context.Background()
+	e, srv := setup(t)
+	k := e.Surface.Find(fakectl.ThingToken)
+	raw := srv.Put("things", map[string]any{"name": "legacy", "enabled": true, "mode": "FAST", "tags": []any{}})
+	old := "private:" + raw
+	in := pm(map[string]any{"name": "legacy"})
+	r, err := e.Read(ctx, k, old, in, false)
+	if err != nil || r == nil || r.ID != old {
+		t.Fatalf("read of a stored private id: %+v %v", r, err)
+	}
+	if _, err := e.Update(ctx, k, old, in, pm(map[string]any{"name": "legacy2"})); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if err := e.Delete(ctx, k, old); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if srv.Count("things") != 0 {
+		t.Error("the object must be gone")
 	}
 }
 

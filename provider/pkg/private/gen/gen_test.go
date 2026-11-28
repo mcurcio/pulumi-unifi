@@ -9,9 +9,9 @@ import (
 
 	pschema "github.com/pulumi/pulumi/pkg/v3/codegen/schema"
 
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/kind"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/uos"
 )
 
@@ -115,14 +115,19 @@ func TestNoModelIsGolden(t *testing.T) {
 		t.Fatal("without a model, schema.merged.json must equal schema.json byte for byte")
 	}
 	s, err := engine.ParseSurface(out.Surface)
-	if err != nil || len(s.Kinds) != 0 || len(out.Tokens) != 0 {
+	if err != nil || len(s.Private()) != 0 || len(out.Tokens) != 0 {
 		t.Fatalf("empty surface: %v %v", s, err)
 	}
-	// The engine-served official singletons are served at PRIVATE=0 too; the
-	// dispatcher test pins this exact entry (dispatch_singleton_test.go).
-	want := `{"api":"official","merge":"leadingBlock","path":"/v1/sites/{siteId}/acl-rules/ordering","property":"orderedAclRuleIds","token":"unifi:sites/v1:AclRuleOrdering"}`
-	if !strings.Contains(string(bytes.Join(bytes.Fields(out.Surface), nil)), want) {
-		t.Errorf("the PRIVATE=0 surface must serve AclRuleOrdering: %s", out.Surface)
+	// The official engine-served kinds are served at PRIVATE=0 too, as Kind
+	// data; the dispatcher test pins this exact surface
+	// (dispatch_singleton_test.go orderingSurface).
+	want := `{"kinds":[{"api":"official","collection":"","createPath":"","envelope":"","fields":` +
+		`{"orderedAclRuleIds":{"items":{"type":"string"},"merge":"leadingBlock","property":"orderedAclRuleIds",` +
+		`"required":true,"type":"array","wire":"orderedAclRuleIds"}},"idField":"","itemGet":true,` +
+		`"itemPath":"/v1/sites/{siteId}/acl-rules/ordering","keyedBySite":true,"kind":"","listGet":false,` +
+		`"listPath":"","naturalKey":null,"shape":"singleton","token":"unifi:sites/v1:AclRuleOrdering"}],"source":{}}`
+	if got := string(bytes.Join(bytes.Fields(out.Surface), nil)); got != want {
+		t.Errorf("the PRIVATE=0 surface must serve exactly AclRuleOrdering:\n got %s\nwant %s", got, want)
 	}
 	if err := Lint(g, out.Schema, out.Surface); err != nil {
 		t.Fatal(err)

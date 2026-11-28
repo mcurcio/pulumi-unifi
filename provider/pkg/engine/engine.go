@@ -14,21 +14,27 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
 )
 
-// IDPrefix is the prefix of every stored private id (frame rule 3: a stored
-// id names its API).
-const IDPrefix = "private:"
+// storedAPIs are the API names a stored id can carry (frame rule 3: a stored
+// id names its API, "<api>:<id>"). An id naming another API than the kind's
+// binding is never handed to that binding.
+var storedAPIs = []string{"official", "private", "mac"}
 
-// otherPrefixes are stored-id prefixes of the other bindings. Such an id is
-// never handed to the private API.
-var otherPrefixes = []string{"official:", "mac:"}
-
-// Binding does the private API's wire calls for one kind. Values are decoded
-// JSON (numbers as json.Number), with the response envelope removed.
+// Binding does one API's wire calls. Values are decoded JSON (numbers as
+// json.Number), with the response envelope removed. A binding maps wire
+// outcomes to domain outcomes (found=false for gone, ErrIncomplete, its own
+// typed refusals); it never decides what to send.
 type Binding interface {
+	// API names the API in stored ids: "<API()>:<id>" ("private" for the
+	// v2 and classic bindings, "official" for the official one).
+	API() string
+	// SiteID turns the configured site (a name or an id) into the form this
+	// API addresses sites by. Used for kinds keyed by their site.
+	SiteID(ctx context.Context, site string) (string, error)
 	// List returns the kind's collection.
 	List(ctx context.Context, k *Kind) ([]map[string]any, error)
-	// Get returns one object by its controller id; found is false on 404.
-	// Called only for kinds whose item path answers GET.
+	// Get returns one object by its controller id (a site-keyed singleton:
+	// the site's id); found is false on 404. Called only for kinds whose item
+	// path answers GET.
 	Get(ctx context.Context, k *Kind, id string) (obj map[string]any, found bool, err error)
 	// Create posts body (an object, or a one-element list for CreateList
 	// kinds) and returns the decoded response.
@@ -43,14 +49,80 @@ type Binding interface {
 // ErrNotFound reports an object that is gone.
 var ErrNotFound = errors.New("not found")
 
-// Engine runs the private kinds' lifecycle.
+// ErrIncomplete is a binding's outcome for a write the server refuses because
+// it does not list every live entry (a leadingBlock PUT that misses an entry
+// created elsewhere between the GET and the PUT).
+var ErrIncomplete = errors.New("the order does not list every live entry")
+
+// Engine runs the lifecycle of every engine-served kind.
 type Engine struct {
 	Surface *Surface
-	Binding Binding
+	// Bindings holds one binding per API (Kind.API).
+	Bindings map[string]Binding
+	// Site is the provider-level site (config siteId), for kinds keyed by
+	// their site when the resource does not set its own; nil or empty is
+	// "default".
+	Site func() string
 	// Warn reports something the user should see (a singleton's release on
 	// Delete); nil drops it.
 	Warn func(msg string)
 }
+
+// bind returns the kind's binding; a kind whose API has no binding gets one
+// whose every call fails, naming it.
+func (e *Engine) bind(k *Kind) Binding {
+	if b, ok := e.Bindings[k.API]; ok && b != nil {
+		return b
+	}
+	return unbound(k.API)
+}
+
+// prefix is the stored-id prefix of the kind's objects, "<Binding.API()>:".
+func (e *Engine) prefix(k *Kind) string { return e.bind(k).API() + ":" }
+
+// StoredID is the stored id of a controller object of the kind.
+func (e *Engine) StoredID(k *Kind, raw string) string { return e.prefix(k) + raw }
+
+// ParseID strips the kind's stored-id prefix. Any other form is an error.
+func (e *Engine) ParseID(k *Kind, id string) (string, error) {
+	p := e.prefix(k)
+	if strings.HasPrefix(id, p) && len(id) > len(p) {
+		return strings.TrimPrefix(id, p), nil
+	}
+	what := "<id>"
+	if k.KeyedBySite {
+		what = "<site id>"
+	}
+	return "", fmt.Errorf("stored id %q does not name the %s API (want %s%s)", id, e.bind(k).API(), p, what)
+}
+
+// otherAPI says whether id is a stored id of an API other than the kind's.
+func (e *Engine) otherAPI(k *Kind, id string) bool {
+	own := e.bind(k).API()
+	for _, a := range storedAPIs {
+		if a != own && strings.HasPrefix(id, a+":") {
+			return true
+		}
+	}
+	return false
+}
+
+type unbound string
+
+func (u unbound) err() error {
+	return fmt.Errorf("no binding serves the %s API in this provider", string(u))
+}
+func (u unbound) API() string                                           { return string(u) }
+func (u unbound) SiteID(context.Context, string) (string, error)        { return "", u.err() }
+func (u unbound) List(context.Context, *Kind) ([]map[string]any, error) { return nil, u.err() }
+func (u unbound) Get(context.Context, *Kind, string) (map[string]any, bool, error) {
+	return nil, false, u.err()
+}
+func (u unbound) Create(context.Context, *Kind, any) (any, error) { return nil, u.err() }
+func (u unbound) Update(context.Context, *Kind, string, map[string]any) (any, error) {
+	return nil, u.err()
+}
+func (u unbound) Delete(context.Context, *Kind, string) (bool, error) { return false, u.err() }
 
 func (e *Engine) warn(f string, a ...any) {
 	if e.Warn != nil {
@@ -64,14 +136,6 @@ type Failure struct {
 	Reason   string
 }
 
-// ParseID strips the private prefix. Any other form is an error.
-func ParseID(id string) (string, error) {
-	if strings.HasPrefix(id, IDPrefix) && len(id) > len(IDPrefix) {
-		return strings.TrimPrefix(id, IDPrefix), nil
-	}
-	return "", fmt.Errorf("stored id %q does not name the private API (want %s<id>)", id, IDPrefix)
-}
-
 // ---------------------------------------------------------------- Check
 
 // Check validates the declared values (rule 1: only values that differ from
@@ -79,6 +143,9 @@ func ParseID(id string) (string, error) {
 // required fields, and G-Q1: a managed path dropped since the old inputs must
 // have a default to reset to.
 func (e *Engine) Check(k *Kind, olds, news resource.PropertyMap) []Failure {
+	if k.KeyedBySite {
+		return checkSiteKeyed(k, news)
+	}
 	var fails []Failure
 	add := func(p, f string, a ...any) { fails = append(fails, Failure{Property: p, Reason: fmt.Sprintf(f, a...)}) }
 	nw, err := ToWire(k, news)
@@ -318,6 +385,9 @@ func (e *Engine) Diff(k *Kind, oldInputs, newInputs resource.PropertyMap) (DiffR
 // nothing). This is what makes a program that declares more than an import
 // adopted (natural key + required fields) preview with no changes.
 func (e *Engine) DiffLive(k *Kind, oldInputs, newInputs, oldOutputs resource.PropertyMap) (DiffResult, error) {
+	if k.KeyedBySite {
+		return diffSiteKeyed(k, oldInputs, newInputs), nil
+	}
 	ow, err := ToWire(k, oldInputs)
 	if err != nil {
 		return DiffResult{}, err
@@ -374,6 +444,9 @@ func (e *Engine) DiffLive(k *Kind, oldInputs, newInputs, oldOutputs resource.Pro
 // Create posts a body built only from the inputs and returns the stored id
 // and the outputs.
 func (e *Engine) Create(ctx context.Context, k *Kind, inputs resource.PropertyMap) (string, resource.PropertyMap, error) {
+	if k.KeyedBySite {
+		return e.adoptSite(ctx, k, inputs)
+	}
 	body, err := ToWire(k, inputs)
 	if err != nil {
 		return "", nil, err
@@ -396,7 +469,7 @@ func (e *Engine) Create(ctx context.Context, k *Kind, inputs resource.PropertyMa
 		if len(hits) > 0 {
 			var ids []string
 			for _, h := range hits {
-				ids = append(ids, IDPrefix+idOf(k, h))
+				ids = append(ids, e.StoredID(k, idOf(k, h)))
 			}
 			sort.Strings(ids)
 			return "", nil, fmt.Errorf("a %s with %s already exists (id %s); import it instead of creating a second one",
@@ -420,7 +493,7 @@ func (e *Engine) Create(ctx context.Context, k *Kind, inputs resource.PropertyMa
 	if k.CreateList {
 		send = []any{body}
 	}
-	resp, err := e.Binding.Create(ctx, k, send)
+	resp, err := e.bind(k).Create(ctx, k, send)
 	if err != nil {
 		return "", nil, err
 	}
@@ -439,7 +512,7 @@ func (e *Engine) Create(ctx context.Context, k *Kind, inputs resource.PropertyMa
 			obj = live
 		}
 	}
-	return IDPrefix + id, e.outputs(k, obj, declared), nil
+	return e.StoredID(k, id), e.outputs(k, obj, declared), nil
 }
 
 // adopt is a singleton's Create: nothing can be created, so it reads the one
@@ -454,7 +527,7 @@ func (e *Engine) adopt(ctx context.Context, k *Kind, body map[string]any) (strin
 	if err != nil {
 		return "", nil, err
 	}
-	resp, err := e.Binding.Update(ctx, k, id, merged)
+	resp, err := e.bind(k).Update(ctx, k, id, merged)
 	if err != nil {
 		return "", nil, err
 	}
@@ -464,12 +537,12 @@ func (e *Engine) adopt(ctx context.Context, k *Kind, body map[string]any) (strin
 			obj = merged
 		}
 	}
-	return IDPrefix + id, e.outputs(k, obj, body), nil
+	return e.StoredID(k, id), e.outputs(k, obj, body), nil
 }
 
 // single reads a singleton's one document.
 func (e *Engine) single(ctx context.Context, k *Kind) (map[string]any, error) {
-	all, err := e.Binding.List(ctx, k)
+	all, err := e.bind(k).List(ctx, k)
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +569,7 @@ func (e *Engine) checkVariant(k *Kind, obj map[string]any) error {
 	}
 	return fmt.Errorf("%s %s%s now has %s=%s (changed outside Pulumi); it is served by %s now, not by %s: "+
 		"remove it from this stack (pulumi state delete) and import it there",
-		k.Token, IDPrefix, idOf(k, obj), k.Variant.Field, got, served, k.Token)
+		k.Token, e.prefix(k), idOf(k, obj), k.Variant.Field, got, served, k.Token)
 }
 
 // inVariant says whether a listed object belongs to the kind.
@@ -574,23 +647,25 @@ type ReadResult struct {
 // non-secret field the controller returns (Pulumi narrows them to the
 // import's `properties`). A gone object returns (nil, nil).
 func (e *Engine) Read(ctx context.Context, k *Kind, id string, oldInputs resource.PropertyMap, importing bool) (*ReadResult, error) {
+	if k.KeyedBySite {
+		return e.readSite(ctx, k, id, oldInputs, importing)
+	}
 	var live map[string]any
-	if importing && k.IsSingleton() && !strings.HasPrefix(id, IDPrefix) {
+	prefix := e.prefix(k)
+	if importing && k.IsSingleton() && !strings.HasPrefix(id, prefix) {
 		if id != k.SingletonKey {
-			return nil, fmt.Errorf("import id %q: %s is one document per site; import it by %q or %s<id>", id, k.Token, k.SingletonKey, IDPrefix)
+			return nil, fmt.Errorf("import id %q: %s is one document per site; import it by %q or %s<id>", id, k.Token, k.SingletonKey, prefix)
 		}
 		var err error
 		if live, err = e.single(ctx, k); err != nil {
 			return nil, err
 		}
-	} else if importing && !strings.HasPrefix(id, IDPrefix) {
-		for _, pre := range otherPrefixes {
-			if strings.HasPrefix(id, pre) {
-				return nil, fmt.Errorf("import id %q names another API; %s is served by the private API (use %s<id> or its natural key %s)",
-					id, k.Token, IDPrefix, strings.Join(k.NaturalKey, ","))
-			}
+	} else if importing && !strings.HasPrefix(id, prefix) {
+		if e.otherAPI(k, id) {
+			return nil, fmt.Errorf("import id %q names another API; %s is served by the %s API (use %s<id> or its natural key %s)",
+				id, k.Token, e.bind(k).API(), prefix, strings.Join(k.NaturalKey, ","))
 		}
-		key, err := parseNaturalKey(k, id)
+		key, err := e.parseNaturalKey(k, id)
 		if err != nil {
 			return nil, err
 		}
@@ -599,7 +674,7 @@ func (e *Engine) Read(ctx context.Context, k *Kind, id string, oldInputs resourc
 			return nil, err
 		}
 	} else {
-		raw, err := ParseID(id)
+		raw, err := e.ParseID(k, id)
 		if err != nil {
 			return nil, err
 		}
@@ -614,7 +689,7 @@ func (e *Engine) Read(ctx context.Context, k *Kind, id string, oldInputs resourc
 	if err := e.checkVariant(k, live); err != nil {
 		return nil, err
 	}
-	res := &ReadResult{ID: IDPrefix + idOf(k, live)}
+	res := &ReadResult{ID: e.StoredID(k, idOf(k, live))}
 	if importing || oldInputs == nil {
 		// The adopted managed paths are the natural key plus the required
 		// fields (nested: required within required). Pulumi does not pass an
@@ -669,7 +744,7 @@ func (e *Engine) Read(ctx context.Context, k *Kind, id string, oldInputs resourc
 // fetch reads one object by controller id: item GET, or list + filter.
 func (e *Engine) fetch(ctx context.Context, k *Kind, id string) (map[string]any, error) {
 	if k.ItemGet {
-		obj, found, err := e.Binding.Get(ctx, k, id)
+		obj, found, err := e.bind(k).Get(ctx, k, id)
 		if err != nil {
 			return nil, err
 		}
@@ -678,7 +753,7 @@ func (e *Engine) fetch(ctx context.Context, k *Kind, id string) (map[string]any,
 		}
 		return obj, nil
 	}
-	all, err := e.Binding.List(ctx, k)
+	all, err := e.bind(k).List(ctx, k)
 	if err != nil {
 		return nil, err
 	}
@@ -692,7 +767,7 @@ func (e *Engine) fetch(ctx context.Context, k *Kind, id string) (map[string]any,
 
 // parseNaturalKey reads an import id: the bare value for a one-field key, or
 // "field=value;field=value" (wire or property names).
-func parseNaturalKey(k *Kind, id string) (map[string]any, error) {
+func (e *Engine) parseNaturalKey(k *Kind, id string) (map[string]any, error) {
 	key := map[string]any{}
 	if id == "" {
 		return nil, errors.New("import id is empty")
@@ -716,24 +791,24 @@ func parseNaturalKey(k *Kind, id string) (map[string]any, error) {
 				Set(key, strings.Split(k.NaturalKey[0], "."), id)
 				return key, nil
 			}
-			return nil, fmt.Errorf("import id %q: want %s", id, keyHint(k))
+			return nil, fmt.Errorf("import id %q: want %s", id, e.keyHint(k))
 		}
 		Set(key, strings.Split(w, "."), val)
 	}
 	for _, w := range k.NaturalKey {
 		if _, ok := Get(key, strings.Split(w, ".")); !ok {
-			return nil, fmt.Errorf("import id %q misses %s: want %s", id, w, keyHint(k))
+			return nil, fmt.Errorf("import id %q misses %s: want %s", id, w, e.keyHint(k))
 		}
 	}
 	return key, nil
 }
 
-func keyHint(k *Kind) string {
+func (e *Engine) keyHint(k *Kind) string {
 	var parts []string
 	for _, w := range k.NaturalKey {
 		parts = append(parts, w+"=<value>")
 	}
-	return IDPrefix + "<id> or " + strings.Join(parts, ";")
+	return e.prefix(k) + "<id> or " + strings.Join(parts, ";")
 }
 
 // lookupByKey lists the collection and returns the one object whose natural
@@ -753,7 +828,7 @@ func (e *Engine) lookupByKey(ctx context.Context, k *Kind, src map[string]any) (
 	default:
 		var ids []string
 		for _, h := range hits {
-			ids = append(ids, IDPrefix+idOf(k, h))
+			ids = append(ids, e.StoredID(k, idOf(k, h)))
 		}
 		sort.Strings(ids)
 		return nil, fmt.Errorf("%d %s objects have %s: %s; import one by its id", len(hits), k.Token, desc, strings.Join(ids, ", "))
@@ -768,7 +843,7 @@ func (e *Engine) matchKey(ctx context.Context, k *Kind, src map[string]any) ([]m
 }
 
 func (e *Engine) byKey(ctx context.Context, k *Kind, src map[string]any) (hits []map[string]any, cands []string, err error) {
-	all, err := e.Binding.List(ctx, k)
+	all, err := e.bind(k).List(ctx, k)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -827,7 +902,10 @@ func keyString(v any) string {
 // default, deep-merge the new inputs' managed paths onto it, full PUT.
 // Unmanaged fields keep their live values; read-only fields are not sent.
 func (e *Engine) Update(ctx context.Context, k *Kind, id string, oldInputs, newInputs resource.PropertyMap) (resource.PropertyMap, error) {
-	raw, err := ParseID(id)
+	if k.KeyedBySite {
+		return e.updateSite(ctx, k, id, newInputs)
+	}
+	raw, err := e.ParseID(k, id)
 	if err != nil {
 		return nil, err
 	}
@@ -859,7 +937,7 @@ func (e *Engine) Update(ctx context.Context, k *Kind, id string, oldInputs, newI
 	if k.Variant != nil {
 		body[k.Variant.Field] = k.Variant.Value
 	}
-	resp, err := e.Binding.Update(ctx, k, raw, body)
+	resp, err := e.bind(k).Update(ctx, k, raw, body)
 	if err != nil {
 		return nil, err
 	}
@@ -927,7 +1005,11 @@ func stripReadOnly(fs map[string]*Field, obj map[string]any) {
 // warning says so (§S2.8). A variant kind is checked first, so a rule whose
 // discriminator changed outside Pulumi is never deleted through this token.
 func (e *Engine) Delete(ctx context.Context, k *Kind, id string) error {
-	raw, err := ParseID(id)
+	if k.KeyedBySite {
+		e.warn("%s %s released: the site's order is left as it is", k.Token, id)
+		return nil
+	}
+	raw, err := e.ParseID(k, id)
 	if err != nil {
 		return err
 	}
@@ -947,7 +1029,7 @@ func (e *Engine) Delete(ctx context.Context, k *Kind, id string) error {
 			return err
 		}
 	}
-	_, err = e.Binding.Delete(ctx, k, raw)
+	_, err = e.bind(k).Delete(ctx, k, raw)
 	return err
 }
 

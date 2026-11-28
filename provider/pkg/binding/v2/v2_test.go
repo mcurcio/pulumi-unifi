@@ -1,4 +1,4 @@
-package binding_test
+package v2_test
 
 import (
 	"context"
@@ -8,10 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	v2 "github.com/mcurcio/pulumi-unifi/provider/pkg/binding/v2"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/controller"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/binding"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/internal/fakectl"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/internal/fakectl"
 )
 
 // Request shapes: v2 site paths, JSON headers, X-API-Key only when set,
@@ -23,7 +22,7 @@ func TestRequestShapes(t *testing.T) {
 	s := fakectl.Surface()
 	thing, group := s.Find(fakectl.ThingToken), s.Find(fakectl.GroupToken)
 
-	c := &binding.Client{BaseURL: srv.URL + "/", Site: "lab"}
+	c := &v2.Binding{BaseURL: srv.URL + "/", Site: "lab"}
 	resp, err := c.Create(ctx, thing, map[string]any{"name": "a"})
 	if err != nil {
 		t.Fatal(err)
@@ -93,41 +92,20 @@ func TestErrorsKeepTheControllerMessage(t *testing.T) {
 	}))
 	defer ts.Close()
 	k := fakectl.Surface().Find(fakectl.ThingToken)
-	_, err := (&binding.Client{BaseURL: ts.URL, Site: "default"}).Create(context.Background(), k, map[string]any{})
-	var he *binding.HTTPError
+	_, err := (&v2.Binding{BaseURL: ts.URL, Site: "default"}).Create(context.Background(), k, map[string]any{})
+	var he *v2.HTTPError
 	if !errors.As(err, &he) || he.Status != 400 || !strings.Contains(err.Error(), "name must not be empty") {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := (&binding.Client{Site: "default"}).List(context.Background(), k); err == nil || !strings.Contains(err.Error(), "networkBaseUrl") || !strings.Contains(err.Error(), "apiHost") {
+	if _, err := (&v2.Binding{Site: "default"}).List(context.Background(), k); err == nil || !strings.Contains(err.Error(), "networkBaseUrl") || !strings.Contains(err.Error(), "apiHost") {
 		t.Errorf("no base URL: %v", err)
 	}
 }
 
-// The classic {"meta":{"rc":…},"data":[…]} envelope is unwrapped, and an rc
-// other than ok is an error.
-func TestClassicEnvelope(t *testing.T) {
-	body := `{"meta":{"rc":"ok"},"data":[{"_id":"1","name":"x"}]}`
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/s/default/rest/") {
-			http.NotFound(w, r)
-			return
-		}
-		_, _ = w.Write([]byte(body))
-	}))
-	defer ts.Close()
-	k := &engine.Kind{Token: engine.TokenPrefix + "Classic", API: "classic", ListPath: "rest/thing", ItemPath: "rest/thing/{id}",
-		ListGet: true, ItemGet: true, IDField: "_id", Envelope: "meta-data"}
-	c := &binding.Client{BaseURL: ts.URL, Site: "default"}
-	l, err := c.List(context.Background(), k)
-	if err != nil || len(l) != 1 || l[0]["name"] != "x" {
-		t.Fatalf("list: %v %v", l, err)
-	}
-	o, found, err := c.Get(context.Background(), k, "1")
-	if err != nil || !found || o["_id"] != "1" {
-		t.Fatalf("get: %v %v %v", o, found, err)
-	}
-	body = `{"meta":{"rc":"error","msg":"api.err.Invalid"},"data":[]}`
-	if _, err := c.List(context.Background(), k); err == nil || !strings.Contains(err.Error(), "api.err.Invalid") {
-		t.Errorf("rc error: %v", err)
+// Stored ids name the private API: the v2 binding's API() is "private", so
+// ids already in state (private:<_id>) keep resolving after the layer move.
+func TestStoredIDAPI(t *testing.T) {
+	if got := (&v2.Binding{}).API(); got != "private" {
+		t.Errorf("API() = %q, want private", got)
 	}
 }

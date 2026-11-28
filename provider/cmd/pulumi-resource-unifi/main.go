@@ -1,12 +1,14 @@
 // pulumi-resource-unifi is the UniFi Pulumi provider plugin binary. It embeds
 // the generated package schema, CRUD metadata, and fixed OpenAPI doc, then
 // serves them through the cloudy-sky-software REST CRUD framework, wrapped by
-// the private-API dispatcher (docs/design/private-binding.md §2).
+// the dispatcher that routes the engine-served kinds to the engine
+// (docs/design/private-binding.md §2, §S2.2).
 //
-// schema.merged.json and private.json are written by `make generate_schema`
+// schema.merged.json and surface.json are written by `make generate_schema`
 // (gitignored). With PRIVATE=0 (the default) schema.merged.json equals the
-// schema.json golden and private.json serves no kinds, so the plugin behaves
-// exactly as the framework alone.
+// schema.json golden and surface.json serves no private kinds, only the
+// official engine-served ones (AclRuleOrdering); every other token reaches
+// the framework exactly as before.
 package main
 
 import (
@@ -14,7 +16,7 @@ import (
 
 	rpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/dispatch"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/provider"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/version"
 )
@@ -37,14 +39,14 @@ var metadataBytes []byte
 //go:embed schema.merged.json
 var mergedSchema []byte
 
-// The private kinds the engine serves.
+// The kinds the engine serves (official engine-served and private).
 //
-//go:embed private.json
-var privateSurface []byte
+//go:embed surface.json
+var surface []byte
 
 func main() {
 	provider.Serve(providerName, version.Version, pulumiSchema, openapiDocBytes, metadataBytes,
 		func(fw rpc.ResourceProviderServer) (rpc.ResourceProviderServer, error) {
-			return private.NewDispatcher(fw, providerName, mergedSchema, privateSurface)
+			return dispatch.NewDispatcher(fw, providerName, mergedSchema, surface)
 		})
 }

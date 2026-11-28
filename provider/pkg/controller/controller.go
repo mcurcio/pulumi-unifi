@@ -62,13 +62,18 @@ type Config struct {
 func New(c Config) *Client {
 	rt := c.Transport
 	if rt == nil {
-		rt = transport(c.AllowInsecure)
+		rt = Transport(c.AllowInsecure)
 	}
 	return &Client{Host: c.APIHost, networkBase: strings.TrimRight(c.NetworkBaseURL, "/"), apiKey: c.APIKey, http: &http.Client{Timeout: 60 * time.Second, Transport: rt},
 		Sleep: time.Sleep, MaxRetries: 3}
 }
 
-func transport(insecure bool) *http.Transport {
+// Transport is the one TLS policy of a controller connection: the
+// framework's inner *http.Transport settings, with TLS verification off only
+// when insecure (allowInsecure). The framework's client uses it too
+// (provider/pkg/provider, allowInsecure), so the two clients differ only in
+// the framework's own 429 wrapper.
+func Transport(insecure bool) *http.Transport {
 	t := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,

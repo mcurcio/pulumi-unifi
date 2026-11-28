@@ -11,12 +11,17 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
 )
 
-var sg = &Singleton{Token: "unifi:sites/v1:AclRuleOrdering", API: "official",
-	Path: "/v1/sites/{siteId}/acl-rules/ordering", Property: "orderedAclRuleIds", Merge: MergeLeadingBlock}
+// sg is the AclRuleOrdering kind as surface.json carries it: a singleton
+// keyed by its site with one leadingBlock field (Kind data, no name check).
+var sg = &Kind{Token: "unifi:sites/v1:AclRuleOrdering", API: APIOfficial, Shape: ShapeSingleton, KeyedBySite: true,
+	ItemPath: "/v1/sites/{siteId}/acl-rules/ordering", ItemGet: true,
+	Fields: map[string]*Field{"orderedAclRuleIds": {Wire: "orderedAclRuleIds", Property: "orderedAclRuleIds",
+		Type: "array", Items: &Field{Type: "string"}, Required: true, Merge: MergeLeadingBlock}}}
 
-// fakeOrder is an OrderBinding over an in-memory order with the server's PUT
-// rule (every live id, exactly once).
+// fakeOrder is the official Binding over an in-memory order with the server's
+// PUT rule (every live id, exactly once).
 type fakeOrder struct {
+	unbound
 	live      []string
 	puts      [][]string
 	beforePut func(f *fakeOrder)
@@ -30,22 +35,30 @@ func (f *fakeOrder) SiteID(_ context.Context, site string) (string, error) {
 	}
 	return site, nil
 }
-func (f *fakeOrder) GetOrder(context.Context, *Singleton, string) ([]string, error) {
-	return append([]string(nil), f.live...), nil
+func (f *fakeOrder) Get(context.Context, *Kind, string) (map[string]any, bool, error) {
+	var l []any
+	for _, id := range f.live {
+		l = append(l, id)
+	}
+	return map[string]any{"orderedAclRuleIds": l}, true, nil
 }
-func (f *fakeOrder) PutOrder(_ context.Context, _ *Singleton, _ string, ids []string) ([]string, error) {
+func (f *fakeOrder) Update(_ context.Context, _ *Kind, _ string, body map[string]any) (any, error) {
 	if f.beforePut != nil {
 		f.beforePut(f)
 	}
+	ids := body["orderedAclRuleIds"].([]string)
 	f.puts = append(f.puts, ids)
 	if len(ids) != len(f.live) {
 		return nil, fmt.Errorf("%w: 400", ErrIncomplete)
 	}
 	f.live = append([]string(nil), ids...)
-	return f.live, nil
+	return body, nil
 }
 
-func ids(xs ...string) resource.PropertyValue { return strings2(xs) }
+// eng is an engine whose official binding is f.
+func eng(f *fakeOrder) *Engine { return &Engine{Bindings: map[string]Binding{APIOfficial: f}} }
+
+func ids(xs ...string) resource.PropertyValue { return idList(xs) }
 
 func in(managed resource.PropertyValue, unlisted string) resource.PropertyMap {
 	m := resource.PropertyMap{"orderedAclRuleIds": managed}
@@ -91,7 +104,6 @@ func TestProject(t *testing.T) {
 }
 
 func TestCheck(t *testing.T) {
-	o := &Ordering{Binding: &fakeOrder{}}
 	for name, c := range map[string]struct {
 		in   resource.PropertyMap
 		want string
@@ -103,7 +115,7 @@ func TestCheck(t *testing.T) {
 		"private id":  {in(ids("private:65f0"), ""), "aclRuleId"},
 		"bad policy":  {in(ids("a"), "FIRST"), "LAST or REJECT"},
 	} {
-		fails := o.Check(sg, c.in)
+		fails := eng(&fakeOrder{}).Check(sg, nil, c.in)
 		var got []string
 		for _, f := range fails {
 			got = append(got, f.Reason)
@@ -117,20 +129,21 @@ func TestCheck(t *testing.T) {
 
 func TestCreateAdoptsAndKeepsUnmanagedTail(t *testing.T) {
 	f := &fakeOrder{live: []string{"r1", "u1", "r2"}, sites: map[string]string{"default": "site-uuid"}}
-	o := &Ordering{Binding: f, Site: func() string { return "default" }}
-	c, err := o.Create(context.Background(), sg, in(ids("r2", "r1"), ""))
+	o := eng(f)
+	o.Site = func() string { return "default" }
+	id, out, err := o.Create(context.Background(), sg, in(ids("r2", "r1"), ""))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ID != "official:site-uuid" {
-		t.Errorf("id %s", c.ID)
+	if id != "official:site-uuid" {
+		t.Errorf("id %s", id)
 	}
 	if !reflect.DeepEqual(f.live, []string{"r2", "r1", "u1"}) {
 		t.Errorf("live after create %v", f.live)
 	}
-	eff, _ := stringList(c.Outputs["effectiveOrder"])
-	if !reflect.DeepEqual(eff, f.live) || c.Outputs["unlisted"].StringValue() != UnlistedLast {
-		t.Errorf("outputs %v", c.Outputs)
+	eff, _ := stringList(out["effectiveOrder"])
+	if !reflect.DeepEqual(eff, f.live) || out["unlisted"].StringValue() != UnlistedLast {
+		t.Errorf("outputs %v", out)
 	}
 }
 
@@ -142,8 +155,7 @@ func TestCreateRetriesOnceOnIncomplete(t *testing.T) {
 			f.live = append(f.live, "late") // created elsewhere between GET and PUT
 		}
 	}
-	o := &Ordering{Binding: f}
-	if _, err := o.Create(context.Background(), sg, in(ids("r1"), "")); err != nil {
+	if _, _, err := eng(f).Create(context.Background(), sg, in(ids("r1"), "")); err != nil {
 		t.Fatalf("one retry must cover a rule created between GET and PUT: %v", err)
 	}
 	if len(f.puts) != 2 || !reflect.DeepEqual(f.live, []string{"r1", "late"}) {
@@ -152,14 +164,14 @@ func TestCreateRetriesOnceOnIncomplete(t *testing.T) {
 	// A second incomplete answer is an error.
 	f2 := &fakeOrder{live: []string{"r1"}}
 	f2.beforePut = func(f *fakeOrder) { f.live = append(f.live, fmt.Sprint("x", len(f.live))) }
-	if _, err := (&Ordering{Binding: f2}).Create(context.Background(), sg, in(ids("r1"), "")); !errors.Is(err, ErrIncomplete) {
+	if _, _, err := eng(f2).Create(context.Background(), sg, in(ids("r1"), "")); !errors.Is(err, ErrIncomplete) {
 		t.Errorf("err %v, want ErrIncomplete after one retry", err)
 	}
 }
 
 func TestRejectFailsAndNamesUnlisted(t *testing.T) {
 	f := &fakeOrder{live: []string{"r1", "u1"}}
-	_, err := (&Ordering{Binding: f}).Update(context.Background(), sg, "official:s", in(ids("r1"), UnlistedReject))
+	_, err := eng(f).Update(context.Background(), sg, "official:s", nil, in(ids("r1"), UnlistedReject))
 	if err == nil || !strings.Contains(err.Error(), "u1") || len(f.puts) != 0 {
 		t.Errorf("err %v puts %v", err, f.puts)
 	}
@@ -167,8 +179,8 @@ func TestRejectFailsAndNamesUnlisted(t *testing.T) {
 
 func TestReadProjectsTheLeadingBlock(t *testing.T) {
 	f := &fakeOrder{live: []string{"u1", "r1", "r2"}}
-	o := &Ordering{Binding: f}
-	r, err := o.ReadOrder(context.Background(), sg, "official:s", in(ids("r1", "r2"), UnlistedLast), false)
+	o := eng(f)
+	r, err := o.Read(context.Background(), sg, "official:s", in(ids("r1", "r2"), UnlistedLast), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,21 +188,21 @@ func TestReadProjectsTheLeadingBlock(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"u1", "r1"}) {
 		t.Errorf("projected inputs %v: an unmanaged rule ahead of a managed one must show as drift", got)
 	}
-	d := o.DiffInputs(sg, r.Inputs, in(ids("r1", "r2"), UnlistedLast))
+	d, _ := o.DiffLive(sg, r.Inputs, in(ids("r1", "r2"), UnlistedLast), nil)
 	if !reflect.DeepEqual(d.Changed, []string{"orderedAclRuleIds"}) || len(d.Replaces) != 0 {
 		t.Errorf("diff %+v", d)
 	}
 	// No drift when the managed block leads.
 	f.live = []string{"r1", "r2", "u1"}
-	r, _ = o.ReadOrder(context.Background(), sg, "official:s", in(ids("r1", "r2"), UnlistedLast), false)
-	if d := o.DiffInputs(sg, r.Inputs, in(ids("r1", "r2"), UnlistedLast)); len(d.Changed) != 0 {
+	r, _ = o.Read(context.Background(), sg, "official:s", in(ids("r1", "r2"), UnlistedLast), false)
+	if d, _ := o.DiffLive(sg, r.Inputs, in(ids("r1", "r2"), UnlistedLast), nil); len(d.Changed) != 0 {
 		t.Errorf("no-op diff %+v", d)
 	}
 }
 
 func TestImportAdoptsWholeOrder(t *testing.T) {
 	f := &fakeOrder{live: []string{"a", "b"}, sites: map[string]string{"default": "uuid-1"}}
-	r, err := (&Ordering{Binding: f}).ReadOrder(context.Background(), sg, "default", nil, true)
+	r, err := eng(f).Read(context.Background(), sg, "default", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,20 +210,20 @@ func TestImportAdoptsWholeOrder(t *testing.T) {
 	if r.ID != "official:uuid-1" || !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Errorf("import id %s inputs %v", r.ID, got)
 	}
-	if _, err := (&Ordering{Binding: f}).ReadOrder(context.Background(), sg, "default", nil, false); err == nil {
+	if _, err := eng(f).Read(context.Background(), sg, "default", nil, false); err == nil {
 		t.Error("a refresh of a non-stored id must fail")
 	}
 }
 
 func TestDiffSiteReplaces(t *testing.T) {
-	o := &Ordering{Binding: &fakeOrder{}}
+	o := eng(&fakeOrder{})
 	a, b := in(ids("r1"), ""), in(ids("r1"), "")
 	b["siteId"] = resource.NewStringProperty("other")
-	d := o.DiffInputs(sg, a, b)
+	d, _ := o.DiffLive(sg, a, b, nil)
 	if !reflect.DeepEqual(d.Replaces, []string{"siteId"}) {
 		t.Errorf("diff %+v", d)
 	}
-	if d := o.DiffInputs(sg, in(ids("r1"), ""), in(ids("r1"), UnlistedLast)); len(d.Changed) != 0 {
+	if d, _ := o.DiffLive(sg, in(ids("r1"), ""), in(ids("r1"), UnlistedLast), nil); len(d.Changed) != 0 {
 		t.Errorf("unlisted default must equal LAST: %+v", d)
 	}
 }
@@ -219,7 +231,11 @@ func TestDiffSiteReplaces(t *testing.T) {
 func TestDeleteReleases(t *testing.T) {
 	f := &fakeOrder{live: []string{"a"}}
 	var warned string
-	(&Ordering{Binding: f, Warn: func(m string) { warned = m }}).Delete(sg, "official:s")
+	o := eng(f)
+	o.Warn = func(m string) { warned = m }
+	if err := o.Delete(context.Background(), sg, "official:s"); err != nil {
+		t.Fatal(err)
+	}
 	if len(f.puts) != 0 || !strings.Contains(warned, "released") {
 		t.Errorf("delete must not call the API (puts %v) and must warn (%q)", f.puts, warned)
 	}
@@ -231,35 +247,63 @@ func TestDeleteReleases(t *testing.T) {
 func TestRejectShowsUnlistedAfterCreateAsDrift(t *testing.T) {
 	ctx := context.Background()
 	f := &fakeOrder{live: []string{"r1", "r2"}}
-	o := &Ordering{Binding: f}
+	o := eng(f)
 	prog := in(ids("r1", "r2"), UnlistedReject)
-	c, err := o.Create(ctx, sg, prog)
+	id, _, err := o.Create(ctx, sg, prog)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// No unlisted entry: the refresh is a no-op.
-	r, err := o.ReadOrder(ctx, sg, c.ID, prog, false)
+	r, err := o.Read(ctx, sg, id, prog, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := o.DiffInputs(sg, r.Inputs, prog); len(d.Changed) != 0 {
+	if d, _ := o.DiffLive(sg, r.Inputs, prog, nil); len(d.Changed) != 0 {
 		t.Fatalf("no unlisted entry: diff %v, want none", d.Changed)
 	}
 	f.live = append(f.live, "x") // created elsewhere, in the tail
-	r, err = o.ReadOrder(ctx, sg, c.ID, prog, false)
+	r, err = o.Read(ctx, sg, id, prog, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := o.DiffInputs(sg, r.Inputs, prog)
+	d, _ := o.DiffLive(sg, r.Inputs, prog, nil)
 	if len(d.Changed) == 0 || d.Changed[0] != "orderedAclRuleIds" {
 		t.Fatalf("unlisted tail entry with REJECT: diff %v, want orderedAclRuleIds changed", d.Changed)
 	}
-	if _, err := o.Update(ctx, sg, c.ID, prog); err == nil || !strings.Contains(err.Error(), "x") {
+	if _, err := o.Update(ctx, sg, id, nil, prog); err == nil || !strings.Contains(err.Error(), "x") {
 		t.Fatalf("update after drift: err %v, want REJECT naming x", err)
 	}
 	// LAST keeps the tail out of the projection.
-	r, _ = o.ReadOrder(ctx, sg, c.ID, in(ids("r1", "r2"), UnlistedLast), false)
-	if d := o.DiffInputs(sg, r.Inputs, in(ids("r1", "r2"), UnlistedLast)); len(d.Changed) != 0 {
+	r, _ = o.Read(ctx, sg, id, in(ids("r1", "r2"), UnlistedLast), false)
+	if d, _ := o.DiffLive(sg, r.Inputs, in(ids("r1", "r2"), UnlistedLast), nil); len(d.Changed) != 0 {
 		t.Fatalf("LAST: diff %v, want none", d.Changed)
+	}
+}
+
+// Stored ids name the binding's API (Binding.API()), not a constant: the
+// singleton's id is official:<site id>, and a private id is refused for it.
+func TestSiteKeyedStoredIDComesFromTheBinding(t *testing.T) {
+	o := eng(&fakeOrder{live: []string{"a"}})
+	if _, err := o.Read(context.Background(), sg, "private:s", in(ids("a"), ""), false); err == nil ||
+		!strings.Contains(err.Error(), "official:<site id>") {
+		t.Errorf("a private: id for an official kind: %v", err)
+	}
+	if got := o.StoredID(sg, "s"); got != "official:s" {
+		t.Errorf("StoredID %s", got)
+	}
+}
+
+func TestDefaultsFillUnlisted(t *testing.T) {
+	o := eng(&fakeOrder{})
+	got, changed := o.Defaults(sg, in(ids("a"), ""))
+	if !changed || got["unlisted"].StringValue() != UnlistedLast {
+		t.Errorf("defaults %v %v", got, changed)
+	}
+	if got, _ := o.Defaults(sg, in(ids("a"), UnlistedReject)); got["unlisted"].StringValue() != UnlistedReject {
+		t.Errorf("a declared policy is kept: %v", got)
+	}
+	k := &Kind{Token: "unifi:network:X", API: APIV2}
+	if _, changed := o.Defaults(k, resource.PropertyMap{}); changed {
+		t.Error("a kind without engine-owned defaults is left as it is")
 	}
 }

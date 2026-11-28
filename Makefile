@@ -27,10 +27,11 @@ GEN_DIR      := provider/cmd/pulumi-resource-$(PACK)
 SCHEMA_FILE  := $(GEN_DIR)/schema.json
 # The private-API switch (docs/design/private-binding.md §4). PRIVATE=0 (the
 # default, and CI): schema.merged.json is the schema.json golden byte for byte
-# and private.json serves no kinds, so every existing gate sees no change.
+# and surface.json serves no private kinds (only the official engine-served
+# ones), so every existing gate sees no change.
 # PRIVATE=1: generate_schema needs build/uos/model.json (the pinned installer)
 # and merges the private kinds (unifi:network:*) into the merged schema, the
-# plugin and the SDK. The merged schema and private.json are gitignored.
+# plugin and the SDK. The merged schema and surface.json are gitignored.
 PRIVATE      ?= 0
 MERGED_SCHEMA := $(GEN_DIR)/schema.merged.json
 PRIVATE_MODEL_DEP := $(if $(filter 1,$(PRIVATE)),$(UOS_MODEL),)
@@ -65,8 +66,8 @@ gen::
 	cd provider && go build $(LDFLAGS) -o $(BIN)/$(CODEGEN) ./cmd/pulumi-gen-$(PACK)
 
 # Run the code generator: spec -> schema.json + metadata.json + openapi_generated.yml,
-# then the private merge -> schema.merged.json + private.json (with PRIVATE=0,
-# a byte copy of the golden and an empty kind table).
+# then the private merge -> schema.merged.json + surface.json (with PRIVATE=0,
+# a byte copy of the golden and only the official engine-served kinds).
 generate_schema:: gen $(SPEC) $(PRIVATE_MODEL_DEP)
 	$(BIN)/$(CODEGEN) -spec=$(SPEC) -out=$(GEN_DIR) -version=$(VERSION) schema
 	$(BIN)/$(CODEGEN) private $(PRIVATE_MODEL_ARG) -golden $(SCHEMA_FILE) -out $(GEN_DIR)
@@ -158,7 +159,7 @@ test-mock:: build
 	done; \
 	[ -n "$$ready" ] || { echo "ERROR: mock not ready on https://127.0.0.1:8443 (last HTTP $$code)"; exit 1; }; \
 	UNIFI_MOCK_ADDR=127.0.0.1:8443 \
-		go -C provider test -tags integration -count=1 -run 'TestReadPathAgainstMock|TestWritePathAgainstMock|TestACLRuleWritesAgainstMock|TestOrderingAgainstMock' ./pkg/provider/ ./pkg/private/
+		go -C provider test -tags integration -count=1 -run 'TestReadPathAgainstMock|TestWritePathAgainstMock|TestACLRuleWritesAgainstMock|TestOrderingAgainstMock' ./pkg/provider/ ./pkg/dispatch/
 
 # Python SDK smoke test: regenerate the SDK, install it (+ pulumi + pytest) into
 # a throwaway venv, and assert pulumi_unifi imports with its stable class set
@@ -226,7 +227,7 @@ $(UOS_MODEL): uos/pin.env openapi/pin.env $(UOS_SRC) | $(UOS_INSTALLER_FILE)
 uos-model:: $(UOS_MODEL)
 
 # HARD private-model gate (needs the installer): the generated private surface
-# (schema.merged.json + private.json digests, tokens.txt, the private surface
+# (schema.merged.json + surface.json digests, tokens.txt, the private surface
 # lint); model digest vs
 # provider/pkg/private/testdata/digests.txt, canonical form, the pin ties
 # (Network version == SPEC_VERSION; the installer's integration.json SHA-256

@@ -7,9 +7,9 @@ import (
 
 	pschema "github.com/pulumi/pulumi/pkg/v3/codegen/schema"
 
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/kind"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
 )
 
 // resource builds the Pulumi resource spec of one kind.
@@ -114,7 +114,7 @@ func (g *generator) typeSpec(tok string, f *engine.Field, path string) (pschema.
 		}
 		return pschema.TypeSpec{Type: "object", AdditionalProperties: &vs}, nil
 	case kind.TypeObject:
-		name := engine.TokenPrefix + tok + typeSuffix(path)
+		name := engine.PrivateTokenPrefix + tok + typeSuffix(path)
 		if _, done := g.types[name]; done {
 			return pschema.TypeSpec{}, fmt.Errorf("type %s is generated twice (rename a field)", name)
 		}

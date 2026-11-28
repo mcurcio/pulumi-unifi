@@ -1,4 +1,4 @@
-package private
+package dispatch
 
 import (
 	"context"
@@ -10,13 +10,17 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource/plugin"
 	pulumirpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/internal/fakectl"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/internal/fakectl"
 )
 
-// orderingSurface is the PRIVATE=0 surface's singleton entry, as
-// private/gen.EmptySurface writes it (checked there by TestNoModelIsGolden).
-const orderingSurface = `{"source":{},"kinds":[],"singletons":[{"api":"official","merge":"leadingBlock",` +
-	`"path":"/v1/sites/{siteId}/acl-rules/ordering","property":"orderedAclRuleIds","token":"unifi:sites/v1:AclRuleOrdering"}]}`
+// orderingSurface is the PRIVATE=0 surface, as private/gen.EmptySurface
+// writes it (checked there by TestNoModelIsGolden): one official kind, a
+// singleton keyed by its site with one leadingBlock field.
+const orderingSurface = `{"kinds":[{"api":"official","collection":"","createPath":"","envelope":"","fields":` +
+	`{"orderedAclRuleIds":{"items":{"type":"string"},"merge":"leadingBlock","property":"orderedAclRuleIds",` +
+	`"required":true,"type":"array","wire":"orderedAclRuleIds"}},"idField":"","itemGet":true,` +
+	`"itemPath":"/v1/sites/{siteId}/acl-rules/ordering","keyedBySite":true,"kind":"","listGet":false,` +
+	`"listPath":"","naturalKey":null,"shape":"singleton","token":"unifi:sites/v1:AclRuleOrdering"}],"source":{}}`
 
 const (
 	orderingURN = "urn:pulumi:dev::proj::unifi:sites/v1:AclRuleOrdering::order"

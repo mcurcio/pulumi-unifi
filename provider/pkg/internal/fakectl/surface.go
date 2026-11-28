@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 )
 
 func i64(v int64) *int64     { return &v }
@@ -20,11 +20,11 @@ func f64(v float64) *float64 { return &v }
 // serves V4 and L2) with a create default and output-only fields; Crew, a
 // classic collection; and Tick, a classic settings singleton.
 const (
-	ThingToken = engine.TokenPrefix + "Thing"
-	GroupToken = engine.TokenPrefix + "Group"
-	Rule6Token = engine.TokenPrefix + "Rule6"
-	CrewToken  = engine.TokenPrefix + "Crew"
-	TickToken  = engine.TokenPrefix + "SettingTick"
+	ThingToken = engine.PrivateTokenPrefix + "Thing"
+	GroupToken = engine.PrivateTokenPrefix + "Group"
+	Rule6Token = engine.PrivateTokenPrefix + "Rule6"
+	CrewToken  = engine.PrivateTokenPrefix + "Crew"
+	TickToken  = engine.PrivateTokenPrefix + "SettingTick"
 	// TickID is the id of the one Tick document Start seeds.
 	TickID = "0000000000000000000000ff"
 )
@@ -145,7 +145,7 @@ func Start(site string) *Server {
 	return s
 }
 
-// SurfaceJSON is Surface as private.json bytes.
+// SurfaceJSON is Surface as surface.json bytes.
 func SurfaceJSON() []byte {
 	b, _ := json.Marshal(Surface())
 	return b

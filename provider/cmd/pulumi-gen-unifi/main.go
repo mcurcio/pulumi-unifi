@@ -13,7 +13,7 @@
 //	pulumi-gen-unifi private [-model build/uos/model.json] [-overrides kinds.yaml] -golden schema.json -out DIR
 //
 // private merges the private kinds (docs/design/private-binding.md §5) into
-// schema.merged.json and writes the engine's private.json; without -model the
+// schema.merged.json and writes the engine's surface.json; without -model the
 // merged schema is the golden byte for byte.
 //
 // uos-extract reads the pinned UniFi OS Server installer (never executing it)

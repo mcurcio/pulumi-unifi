@@ -1,11 +1,12 @@
 // Package gen generates the private surface (docs/design/private-binding.md
 // §5, §S2.7, §S2.8): the extracted model + kinds.yaml + the official golden schema →
 // schema.merged.json (the golden plus the private resources, types and the
-// networkBaseUrl config key) and private.json (the engine's kind table).
+// networkBaseUrl config key) and surface.json (the engine's kind table: every
+// engine-served kind, tagged with its api).
 //
 // Without a model (PRIVATE=0, the default and CI) the merged schema is the
-// golden byte for byte and private.json holds no kinds. Both outputs are
-// gitignored build artifacts.
+// golden byte for byte and surface.json holds only the official engine-served
+// kinds. Both outputs are gitignored build artifacts.
 package gen
 
 import (
@@ -19,11 +20,10 @@ import (
 
 	pschema "github.com/pulumi/pulumi/pkg/v3/codegen/schema"
 
-	core "github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 	officialgen "github.com/mcurcio/pulumi-unifi/provider/pkg/gen"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/kind"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
 )
 
 // Package-level names of the private fragment.
@@ -41,7 +41,7 @@ var reserved = map[string]bool{"id": true, "urn": true}
 // Output is the generator's result.
 type Output struct {
 	Schema  []byte // schema.merged.json
-	Surface []byte // private.json
+	Surface []byte // surface.json
 	// Tokens lists the private tokens ("resource:unifi:network:QosRule").
 	Tokens []string
 	// NotServed lists the exposed kinds that were built and checked but not
@@ -49,26 +49,33 @@ type Output struct {
 	NotServed []string
 }
 
-// EmptySurface is private.json without a model: no private kinds, only the
-// engine-served official singletons (mappings.yaml `singletons:`).
+// EmptySurface is surface.json without a model: no private kinds, only the
+// official engine-served kinds (mappings.yaml `singletons:`).
 func EmptySurface() []byte {
-	b, err := marshalSurface(&engine.Surface{Kinds: []*engine.Kind{}, Singletons: singletons()})
+	b, err := marshalSurface(&engine.Surface{Kinds: officialKinds()})
 	if err != nil {
 		panic(err) // static data: a failure is a build defect
 	}
 	return b
 }
 
-// singletons lists the official singletons the engine serves, sorted by token.
-func singletons() []*core.Singleton {
-	var out []*core.Singleton
+// officialKinds are the official engine-served kinds, sorted by token: each
+// mappings.yaml `singletons:` entry as Kind data (a singleton keyed by its
+// site whose one field, the PUT body's list of ids, has its merge strategy).
+// provider/pkg/gen builds the same entries' schema (pass_singletons.go).
+func officialKinds() []*engine.Kind {
+	out := []*engine.Kind{}
 	for _, sg := range officialgen.Singletons() {
-		out = append(out, &core.Singleton{Token: sg.Token, API: "official", Path: sg.Path, Property: sg.Property, Merge: sg.Merge})
+		out = append(out, &engine.Kind{Token: sg.Token, API: engine.APIOfficial,
+			Shape: engine.ShapeSingleton, KeyedBySite: true, ItemPath: sg.Path, ItemGet: true,
+			Fields: map[string]*engine.Field{sg.Property: {Wire: sg.Property, Property: sg.Property, Type: kind.TypeArray,
+				Items: &engine.Field{Type: kind.TypeString}, Required: true, Merge: sg.Merge}}})
 	}
 	return out
 }
 
 func marshalSurface(s *engine.Surface) ([]byte, error) {
+	sort.SliceStable(s.Kinds, func(i, j int) bool { return s.Kinds[i].Token < s.Kinds[j].Token })
 	raw, err := json.Marshal(s)
 	if err != nil {
 		return nil, err
@@ -92,8 +99,7 @@ func Generate(m *kind.Model, o *private.Overrides, golden []byte) (*Output, erro
 		return nil, fmt.Errorf("parsing the golden schema: %w", err)
 	}
 	g := &generator{m: m, o: o, spec: &spec, types: map[string]pschema.ComplexTypeSpec{}}
-	surf := &engine.Surface{Source: engine.SurfaceSource{UOSVersion: m.Source.UOSVersion, NetworkVersion: m.Source.NetworkVersion},
-		Singletons: singletons()}
+	surf := &engine.Surface{Source: engine.SurfaceSource{UOSVersion: m.Source.UOSVersion, NetworkVersion: m.Source.NetworkVersion}}
 	exp := append([]private.Expose(nil), o.Expose...)
 	sort.Slice(exp, func(i, j int) bool { return exp[i].Token < exp[j].Token })
 	var errs, notServed []string
@@ -106,7 +112,7 @@ func Generate(m *kind.Model, o *private.Overrides, golden []byte) (*Output, erro
 				errs = append(errs, err.Error())
 				continue
 			}
-			notServed = append(notServed, engine.TokenPrefix+e.Token+": NOT SERVED ("+why+")")
+			notServed = append(notServed, engine.PrivateTokenPrefix+e.Token+": NOT SERVED ("+why+")")
 			continue
 		}
 		k, err := g.kind(e)
@@ -133,13 +139,13 @@ func Generate(m *kind.Model, o *private.Overrides, golden []byte) (*Output, erro
 	if err != nil {
 		return nil, err
 	}
-	pb, err := marshalSurface(surf)
-	if err != nil {
-		return nil, err
-	}
-	out := &Output{Schema: sb, Surface: pb, NotServed: notServed}
+	out := &Output{Schema: sb, NotServed: notServed}
 	for _, k := range surf.Kinds {
 		out.Tokens = append(out.Tokens, "resource:"+k.Token)
+	}
+	surf.Kinds = append(surf.Kinds, officialKinds()...)
+	if out.Surface, err = marshalSurface(surf); err != nil {
+		return nil, err
 	}
 	sort.Strings(out.Tokens)
 	return out, nil
@@ -369,7 +375,7 @@ func (g *generator) kind(e private.Expose) (*engine.Kind, error) {
 			twinTokens = append(twinTokens, strings.TrimPrefix(tok, "resource:"))
 		}
 	}
-	token := engine.TokenPrefix + e.Token
+	token := engine.PrivateTokenPrefix + e.Token
 	if _, clash := g.spec.Resources[token]; clash {
 		return nil, fmt.Errorf("%s: token %s already exists in the official schema", e.Ref, token)
 	}

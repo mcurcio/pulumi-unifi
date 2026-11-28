@@ -1,5 +1,5 @@
 // Package fakectl is an in-memory stand-in for the Network application's v2
-// and classic APIs, for Tier-1 tests of the private binding, engine and
+// and classic APIs, for Tier-1 tests of the private bindings, engine and
 // dispatcher. It records every request so tests can assert request shapes.
 //
 // Classic collections (Coll.Classic) live under /api/s/<site>/ and answer the

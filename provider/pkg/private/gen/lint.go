@@ -11,7 +11,7 @@ import (
 
 	pschema "github.com/pulumi/pulumi/pkg/v3/codegen/schema"
 
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 )
 
 var (
@@ -21,7 +21,7 @@ var (
 
 // Lint is the private surface lint (design §11): token grammar, no change to
 // the golden's own entries, property naming, secrets flagged, and the schema
-// and private.json agreeing kind for kind. It also binds the merged schema
+// and surface.json agreeing kind for kind. It also binds the merged schema
 // with Pulumi's schema checker.
 func Lint(golden, merged, surface []byte) error {
 	var errs []string
@@ -61,16 +61,23 @@ func Lint(golden, merged, surface []byte) error {
 	}
 	served := map[string]bool{}
 	for _, k := range s.Kinds {
+		if !k.IsPrivate() {
+			// An official engine-served kind: its schema is the golden's own.
+			if _, ok := g.Resources[k.Token]; !ok {
+				add("official engine kind %s: not a resource of the official golden", k.Token)
+			}
+			continue
+		}
 		served[k.Token] = true
 		if !rePrivateToken.MatchString(k.Token) {
 			add("token %s is not unifi:network:<PascalCase>", k.Token)
 		}
-		if !strings.HasPrefix(k.Token, engine.TokenPrefix) {
-			add("token %s is outside %s", k.Token, engine.TokenPrefix)
+		if !strings.HasPrefix(k.Token, engine.PrivateTokenPrefix) {
+			add("token %s is outside %s", k.Token, engine.PrivateTokenPrefix)
 		}
 		r, ok := m.Resources[k.Token]
 		if !ok {
-			add("%s: in private.json but not in the merged schema", k.Token)
+			add("%s: in surface.json but not in the merged schema", k.Token)
 			continue
 		}
 		lintFields(k.Token, k.Fields, r.Properties, m.Types, add)
@@ -83,7 +90,7 @@ func Lint(golden, merged, surface []byte) error {
 			continue
 		}
 		if !served[tok] {
-			add("%s: in the merged schema but not served by private.json", tok)
+			add("%s: in the merged schema but not served by surface.json", tok)
 		}
 	}
 	for tok := range m.Types {
@@ -91,12 +98,7 @@ func Lint(golden, merged, surface []byte) error {
 			add("type %s is not unifi:network:<PascalCase>", tok)
 		}
 	}
-	for _, sg := range s.Singletons {
-		if _, ok := g.Resources[sg.Token]; !ok {
-			add("singleton %s: not a resource of the official golden", sg.Token)
-		}
-	}
-	if len(s.Kinds) > 0 {
+	if len(s.Private()) > 0 {
 		if _, ok := m.Config.Variables[ConfigBaseURL]; !ok {
 			add("config %s is missing", ConfigBaseURL)
 		}
@@ -127,11 +129,11 @@ func lintFields(tok string, fs map[string]*engine.Field, props map[string]pschem
 		}
 		p, ok := props[f.Property]
 		if !ok {
-			add("%s.%s: in private.json but not in the schema", tok, f.Property)
+			add("%s.%s: in surface.json but not in the schema", tok, f.Property)
 			continue
 		}
 		if p.Secret != f.Secret {
-			add("%s.%s: secret flags differ between the schema and private.json", tok, f.Property)
+			add("%s.%s: secret flags differ between the schema and surface.json", tok, f.Property)
 		}
 		if f.Type == "object" && strings.HasPrefix(p.Ref, "#/types/") {
 			t := types[strings.TrimPrefix(p.Ref, "#/types/")]

@@ -8,15 +8,13 @@ package engine_test
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
 
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/binding"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/internal/fakectl"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/binding/classic"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/internal/fakectl"
 )
 
 // --- variant pin -----------------------------------------------------------------
@@ -220,7 +218,7 @@ func TestClassicCollectionLifecycle(t *testing.T) {
 	}
 	// A refused value is a typed error naming the field and pattern.
 	_, err = e.Update(ctx, k, id, pm(map[string]any{"name": "c1"}), pm(map[string]any{"name": "c1", "rateMax": 1}))
-	var ce *binding.ClassicError
+	var ce *classic.ClassicError
 	if !errors.As(err, &ce) || ce.Field != "rate_max" || !strings.Contains(err.Error(), "field rate_max must match") {
 		t.Errorf("refused value: %v", err)
 	}
@@ -234,39 +232,6 @@ func TestClassicCollectionLifecycle(t *testing.T) {
 	// A gone object reads as gone (200 with data:[]).
 	if r, err := e.Read(ctx, k, id, in, false); r != nil || err != nil {
 		t.Errorf("read of a gone object: %v %v", r, err)
-	}
-}
-
-func TestClassicIdInvalidIsGoneOnlyWhenTheListLacksIt(t *testing.T) {
-	ctx := context.Background()
-	srv := fakectl.Start("default")
-	t.Cleanup(srv.Close)
-	k := fakectl.Surface().Find(fakectl.CrewToken)
-	c := &binding.Client{BaseURL: srv.URL, Site: "default"}
-	found, err := c.Delete(ctx, k, "00000000000000000000beef")
-	if err != nil || found {
-		t.Errorf("IdInvalid for an id the list lacks: found %v err %v; want gone", found, err)
-	}
-	// A malformed id is never in a list either, so the list cannot tell it
-	// from a gone one: it is an error, never a silent success.
-	if _, err := c.Delete(ctx, k, "not-an-id"); err == nil || !strings.Contains(err.Error(), "not a classic object id") {
-		t.Errorf("IdInvalid for a malformed id: err %v; want an error naming the malformed id", err)
-	}
-	// An id the list still holds when the DELETE answers IdInvalid is an
-	// error, not a silent success.
-	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodDelete {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"meta":{"rc":"error","msg":"api.err.IdInvalid"},"data":[]}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"meta":{"rc":"ok"},"data":[{"_id":"held","name":"held"}]}`))
-	}))
-	t.Cleanup(held.Close)
-	c2 := &binding.Client{BaseURL: held.URL, Site: "default"}
-	if _, err := c2.Delete(ctx, k, "held"); err == nil || !strings.Contains(err.Error(), "api.err.IdInvalid") {
-		t.Errorf("a refused DELETE of a listed id must be an error: %v", err)
 	}
 }
 
@@ -340,7 +305,7 @@ func TestSingletonRefusedValueIsTyped(t *testing.T) {
 	e, _ := setup(t)
 	k := e.Surface.Find(fakectl.TickToken)
 	_, _, err := e.Create(ctx, k, pm(map[string]any{"mode": "weekly"}))
-	var ce *binding.ClassicError
+	var ce *classic.ClassicError
 	if !errors.As(err, &ce) || ce.Msg != "api.err.InvalidPayload" || ce.Field != "mode" {
 		t.Errorf("refused enum: %v", err)
 	}

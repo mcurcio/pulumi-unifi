@@ -1,13 +1,13 @@
 //go:build integration
 
 // AclRuleOrdering against the Prism TLS mock (`make test-mock`): the gRPC
-// calls go through the dispatcher, the engine's ordering lifecycle, the
+// calls go through the dispatcher, the engine (the site-keyed leadingBlock singleton), the
 // official binding and the controller client (TLS via allowInsecure, the key
 // header) to the mock (docs/design/private-binding.md §S2.11). Prism keeps no
 // state and validates requests against the spec, so this proves wire and shape
 // (the GET is decoded, the PUT body is spec-valid), not the ordering contract;
 // that is the fake-controller test (dispatch_singleton_test.go) and Tier 2.
-package private
+package dispatch
 
 import (
 	"context"

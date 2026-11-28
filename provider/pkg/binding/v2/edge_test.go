@@ -1,4 +1,4 @@
-package binding_test
+package v2_test
 
 import (
 	"context"
@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/binding/classic"
+	v2 "github.com/mcurcio/pulumi-unifi/provider/pkg/binding/v2"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/controller"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/binding"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/internal/fakectl"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/internal/fakectl"
 )
 
 const siteUUID = "88f7af54-98f8-306a-a1c7-c9349722b1f6"
@@ -55,7 +56,9 @@ func (e *edge) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func edgeClient(t *testing.T, key, site string) (*binding.Client, *edge) {
+// edgeClient returns the v2 binding and the classic binding the dispatcher
+// builds over one controller client and one site resolver.
+func edgeClient(t *testing.T, key, site string) (*v2.Binding, *classic.Binding, *edge) {
 	t.Helper()
 	e := &edge{}
 	srv := httptest.NewTLSServer(http.HandlerFunc(e.serve))
@@ -66,7 +69,9 @@ func edgeClient(t *testing.T, key, site string) (*binding.Client, *edge) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &binding.Client{BaseURL: root, Site: site, Ctl: ctl, Sites: &controller.SiteResolver{C: ctl}}, e
+	sites := &controller.SiteResolver{C: ctl}
+	return &v2.Binding{BaseURL: root, Site: site, Ctl: ctl, Sites: sites},
+		&classic.Binding{BaseURL: root, Site: site, Ctl: ctl, Sites: sites}, e
 }
 
 // Through the edge: the Network root is https://<apiHost>/proxy/network, the
@@ -77,13 +82,13 @@ func TestEdgeKeySiteAndRetry(t *testing.T) {
 	ctx := context.Background()
 	k := fakectl.Surface().Find(fakectl.ThingToken)
 
-	c, e := edgeClient(t, "edge-key-not-real", siteUUID)
+	c, cl, e := edgeClient(t, "edge-key-not-real", siteUUID)
 	for i := 0; i < 2; i++ {
 		if _, err := c.List(ctx, k); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if v, err := c.NetworkVersion(ctx); err != nil || v != "10.4.57" {
+	if v, err := cl.NetworkVersion(ctx); err != nil || v != "10.4.57" {
 		t.Errorf("NetworkVersion = %q, %v", v, err)
 	}
 	want := []string{
@@ -97,7 +102,7 @@ func TestEdgeKeySiteAndRetry(t *testing.T) {
 		t.Errorf("requests:\n%s\nwant:\n%s", strings.Join(e.paths, "\n"), strings.Join(want, "\n"))
 	}
 
-	byName, e2 := edgeClient(t, "edge-key-not-real", "lab")
+	byName, _, e2 := edgeClient(t, "edge-key-not-real", "lab")
 	if _, err := byName.List(ctx, k); err != nil {
 		t.Fatal(err)
 	}
@@ -109,9 +114,9 @@ func TestEdgeKeySiteAndRetry(t *testing.T) {
 // Without the key the edge answers 401 with an HTML page: the error is short,
 // says what to configure, and never holds the page.
 func TestEdgeRefusalIsExplained(t *testing.T) {
-	c, _ := edgeClient(t, "wrong-key-not-real", "lab")
+	c, _, _ := edgeClient(t, "wrong-key-not-real", "lab")
 	_, err := c.List(context.Background(), fakectl.Surface().Find(fakectl.ThingToken))
-	var he *binding.HTTPError
+	var he *v2.HTTPError
 	if !errors.As(err, &he) || he.Status != http.StatusUnauthorized {
 		t.Fatalf("err = %v", err)
 	}
@@ -130,7 +135,7 @@ func TestNoKeyUsesSiteAsGiven(t *testing.T) {
 	defer srv.Close()
 	ctl := controller.New(controller.Config{NetworkBaseURL: srv.URL})
 	root, _ := ctl.NetworkRoot()
-	c := &binding.Client{BaseURL: root, Site: siteUUID, Ctl: ctl, Sites: &controller.SiteResolver{C: ctl}}
+	c := &v2.Binding{BaseURL: root, Site: siteUUID, Ctl: ctl, Sites: &controller.SiteResolver{C: ctl}}
 	if _, err := c.List(context.Background(), fakectl.Surface().Find(fakectl.ThingToken)); err != nil {
 		t.Fatal(err)
 	}

@@ -127,7 +127,7 @@ func TestPrivateSurfaceGolden(t *testing.T) {
 			t.Fatal(err)
 		}
 		writeDigest(t, "schema.merged.json", sum(out.Schema))
-		writeDigest(t, "private.json", sum(out.Surface))
+		writeDigest(t, "surface.json", sum(out.Surface))
 		return
 	}
 	want, err := os.ReadFile(tp)
@@ -138,7 +138,7 @@ func TestPrivateSurfaceGolden(t *testing.T) {
 		t.Errorf("private tokens:\n%s\ntokens.txt:\n%s\nreview, then UPDATE_GOLDEN=1 make private-check", tokens, want)
 	}
 	d := readDigests(t)
-	for name, b := range map[string][]byte{"schema.merged.json": out.Schema, "private.json": out.Surface} {
+	for name, b := range map[string][]byte{"schema.merged.json": out.Schema, "surface.json": out.Surface} {
 		if got := sum(b); got != d[name] {
 			t.Errorf("%s sha256 %s, digests.txt says %s: review the change, then UPDATE_GOLDEN=1 make private-check", name, got, d[name])
 		}

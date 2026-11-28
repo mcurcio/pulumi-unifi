@@ -13,15 +13,15 @@ import (
 )
 
 // privateGen implements `pulumi-gen-unifi private`: model + overrides +
-// golden schema -> schema.merged.json + private.json (design §5). Without
-// -model the merged schema is the golden byte for byte and private.json holds
-// no kinds (PRIVATE=0).
+// golden schema -> schema.merged.json + surface.json (design §5, §S2.2).
+// Without -model the merged schema is the golden byte for byte and
+// surface.json holds only the official engine-served kinds (PRIVATE=0).
 func privateGen(args []string) error {
 	fs := flag.NewFlagSet("private", flag.ContinueOnError)
 	modelPath := fs.String("model", "", "the extracted model (build/uos/model.json); empty: no private kinds")
 	overridesPath := fs.String("overrides", "", "kinds.yaml (default: the embedded provider/pkg/private/kinds.yaml)")
 	goldenPath := fs.String("golden", filepath.Join("provider", "cmd", "pulumi-resource-unifi", "schema.json"), "the official golden schema")
-	outDir := fs.String("out", filepath.Join("provider", "cmd", "pulumi-resource-unifi"), "where to write schema.merged.json and private.json")
+	outDir := fs.String("out", filepath.Join("provider", "cmd", "pulumi-resource-unifi"), "where to write schema.merged.json and surface.json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func privateGen(args []string) error {
 	if err := writeAtomic(filepath.Join(*outDir, "schema.merged.json"), out.Schema); err != nil {
 		return err
 	}
-	if err := writeAtomic(filepath.Join(*outDir, "private.json"), out.Surface); err != nil {
+	if err := writeAtomic(filepath.Join(*outDir, "surface.json"), out.Surface); err != nil {
 		return err
 	}
 	if m == nil {

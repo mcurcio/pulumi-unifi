@@ -124,7 +124,7 @@ func binaryArtifact(path, lower string) string {
 
 // looksLikeModel: a JSON object with a top-level kinds list that is either
 // non-empty or carries pinned-source provenance (networkVersion or
-// integrationSha256), i.e. kind.Model. An empty private.json ({"kinds": [],
+// integrationSha256), i.e. kind.Model. An empty surface.json ({"kinds": [],
 // "source": {}}) is not flagged.
 func looksLikeModel(b []byte) bool {
 	var v struct {
@@ -220,14 +220,14 @@ func TestExtractedArtifactShapes(t *testing.T) {
 	}
 	write("model.json", []byte(`{"kinds":[{"kind":"x","secret":true,"itemGet":false}],"source":{"networkVersion":"1"}}`))
 	write("prov.json", []byte(`{"kinds":[],"source":{"integrationSha256":"ab"}}`))
-	write("private.json", []byte(`{"kinds":[],"source":{}}`))
+	write("surface.json", []byte(`{"kinds":[],"source":{}}`))
 	write("schema.json", []byte(`{"resources":{"unifi:network:QosRule":{}}}`))
 	write("official.json", []byte(`{"resources":{"unifi:sites/v1:Gateway":{}}}`))
 	write("installer", append([]byte("\x7fELF"), 1, 2, 3))
 	write("big.bin", make([]byte, maxFileBytes+1))
 	write("main.go", []byte("package main\n"))
 	for f, bad := range map[string]bool{
-		"model.json": true, "prov.json": true, "private.json": false,
+		"model.json": true, "prov.json": true, "surface.json": false,
 		"schema.json": true, "official.json": false,
 		"installer": true, "big.bin": true, "main.go": false,
 	} {

@@ -1,4 +1,4 @@
-package private
+package dispatch
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 
 	pulumirpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/internal/fakectl"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/internal/fakectl"
 )
 
 // The classic kinds through the gRPC surface (private-binding.md §S2.8): a

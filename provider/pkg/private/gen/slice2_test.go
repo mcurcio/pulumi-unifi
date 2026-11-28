@@ -12,9 +12,9 @@ import (
 
 	pschema "github.com/pulumi/pulumi/pkg/v3/codegen/schema"
 
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/kind"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private"
-	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
 )
 
 // slice2Model is synthModel plus a discriminated twin ("acl-rules", whose
