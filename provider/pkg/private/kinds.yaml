@@ -45,8 +45,8 @@ officialTwins:
     official: ["resource:unifi:sites/v1:DnsARecord", "resource:unifi:sites/v1:DnsAaaaRecord", "resource:unifi:sites/v1:DnsCnameRecord", "resource:unifi:sites/v1:DnsMxRecord", "resource:unifi:sites/v1:DnsSrvRecord", "resource:unifi:sites/v1:DnsTxtRecord"]
     source: "official spec 10.4.57 serves DNS records (/v1/sites/{siteId}/dns/policies); design §5, §10"
   - kind: acl-rules
-    official: ["function:unifi:sites/v1:getIpAclRule", "function:unifi:sites/v1:getMacAclRule", "function:unifi:sites/v1:listAclRules"]
-    source: "official spec 10.4.57 serves ACL rules (/v1/sites/{siteId}/acl-rules); the provider surfaces them as data sources today; design §5, §10"
+    official: ["resource:unifi:sites/v1:TrafficMatchIpv4", "resource:unifi:sites/v1:TrafficMatchMac"]
+    source: "official spec 10.4.57 serves ACL rules with full CRUD (/v1/sites/{siteId}/acl-rules); the provider names the IPV4/MAC variants TrafficMatch* (provider/pkg/gen/mappings.yaml entityPrefixes); design §5, §10"
   - kind: firewall-policies
     official: ["resource:unifi:sites/v1:FirewallPolicy"]
     source: "official spec 10.4.57 serves firewall policies (/v1/sites/{siteId}/firewall/policies); design §5"
