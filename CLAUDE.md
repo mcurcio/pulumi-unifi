@@ -46,9 +46,10 @@ beezly spec (pinned SHA, fetched at build by openapi/fetch.sh — gitignored)
 `openapi_generated.yml`, and `sdk/python/` are all build artifacts (gitignored). `make build` and
 `make test` fetch + regenerate them on demand; the plugin `//go:embed`s five generated files at
 compile time: `schema.json`, `metadata.json`, `openapi_generated.yml` (the framework's inputs) plus
-`schema.merged.json` (what GetSchema serves) and `private.json` (the private kinds the engine serves).
-At `PRIVATE=0` `schema.merged.json` is byte-equal to the golden (`TestNoModelIsGolden`) and
-`private.json` serves no kinds. Only source is tracked: the pin manifest (`openapi/SOURCE` + `fetch.sh`), codegen Go,
+`schema.merged.json` (what GetSchema serves) and `private.json` (the engine's surface: the private kinds
+plus the official engine-served singletons). At `PRIVATE=0` `schema.merged.json` is byte-equal to the
+golden (`TestNoModelIsGolden`) and `private.json` holds no private kinds, only the official singletons
+(today `unifi:sites/v1:AclRuleOrdering`). Only source is tracked: the pin manifest (`openapi/SOURCE` + `fetch.sh`), codegen Go,
 provider glue, and `ExcludedPaths`/fixes.
 
 Toolchain roles:
