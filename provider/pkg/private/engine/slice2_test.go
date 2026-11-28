@@ -243,9 +243,14 @@ func TestClassicIdInvalidIsGoneOnlyWhenTheListLacksIt(t *testing.T) {
 	t.Cleanup(srv.Close)
 	k := fakectl.Surface().Find(fakectl.CrewToken)
 	c := &binding.Client{BaseURL: srv.URL, Site: "default"}
-	found, err := c.Delete(ctx, k, "not-an-id")
+	found, err := c.Delete(ctx, k, "00000000000000000000beef")
 	if err != nil || found {
 		t.Errorf("IdInvalid for an id the list lacks: found %v err %v; want gone", found, err)
+	}
+	// A malformed id is never in a list either, so the list cannot tell it
+	// from a gone one: it is an error, never a silent success.
+	if _, err := c.Delete(ctx, k, "not-an-id"); err == nil || !strings.Contains(err.Error(), "not a classic object id") {
+		t.Errorf("IdInvalid for a malformed id: err %v; want an error naming the malformed id", err)
 	}
 	// An id the list still holds when the DELETE answers IdInvalid is an
 	// error, not a silent success.

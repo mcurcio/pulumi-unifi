@@ -304,6 +304,21 @@ func (c *Client) Update(ctx context.Context, k *engine.Kind, id string, body map
 // equally of a malformed id (probe f1).
 const idInvalid = "api.err.IdInvalid"
 
+// objectID is the shape of a classic _id (a 24-hex-digit object id). A
+// malformed id is absent from every list, so only its shape tells it from a
+// gone one.
+func objectID(id string) bool {
+	if len(id) != 24 {
+		return false
+	}
+	for _, r := range id {
+		if !('0' <= r && r <= '9' || 'a' <= r && r <= 'f' || 'A' <= r && r <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
 // Delete implements engine.Binding.
 func (c *Client) Delete(ctx context.Context, k *engine.Kind, id string) (bool, error) {
 	u, err := c.url(ctx, k, k.ItemPath, id)
@@ -316,7 +331,11 @@ func (c *Client) Delete(ctx context.Context, k *engine.Kind, id string) (bool, e
 	}
 	var ce *ClassicError
 	if errors.As(err, &ce) && ce.Msg == idInvalid && k.ListGet {
-		// Gone, or a malformed id: only a list that lacks the id says gone.
+		// Gone, or a malformed id: a malformed id is an error; a well-formed
+		// one is gone only when a list lacks it.
+		if k.IDField == "_id" && !objectID(id) {
+			return false, fmt.Errorf("%w: %q is not a classic object id (24 hex digits)", err, id)
+		}
 		all, lerr := c.List(ctx, k)
 		if lerr != nil {
 			return false, fmt.Errorf("%w (and the list to confirm it is gone failed: %v)", err, lerr)
