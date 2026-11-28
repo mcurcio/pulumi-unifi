@@ -19,7 +19,7 @@ import (
 // TestSchemaMatchesGolden already guarantees committed == regenerated, so parsing
 // the committed file is equivalent and avoids a pipeline run) and detects the
 // token-INVARIANT breaking classes marked ★ in §4.1: an added required input, a
-// removed output property, a type narrowing (string→enum, enum value removal,
+// removed input property, a removed output property, a type narrowing (string→enum, enum value removal,
 // array→scalar), an added replaceOnChanges, or a removed secret. Token
 // add/remove/rename are already caught by the byte golden + tokens.txt and are
 // deliberately NOT re-detected here.
@@ -134,6 +134,14 @@ func detectBreakingDelta(base, cur pschema.PackageSpec) []breakingItem {
 			}
 		}
 
+		// (f) removed input property: a program that sets it no longer
+		// compiles (or fails Check), e.g. an outputOnly: entry.
+		for name := range bres.InputProperties {
+			if _, present := cres.InputProperties[name]; !present {
+				items = append(items, breakingItem{"removed-input", tok + "." + name})
+			}
+		}
+
 		// (c/d/e) per-property flag & type changes, on inputs and outputs.
 		items = append(items, comparePropMaps(base, cur, tok+" input", bres.InputProperties, cres.InputProperties)...)
 		items = append(items, comparePropMaps(base, cur, tok+" output", bres.Properties, cres.Properties)...)
@@ -151,6 +159,11 @@ func detectBreakingDelta(base, cur pschema.PackageSpec) []breakingItem {
 			for _, name := range cfn.Inputs.Required {
 				if !baseReq[name] {
 					items = append(items, breakingItem{"added-required-input", tok + " input." + name})
+				}
+			}
+			for name := range bfn.Inputs.Properties {
+				if _, present := cfn.Inputs.Properties[name]; !present {
+					items = append(items, breakingItem{"removed-input", tok + " input." + name})
 				}
 			}
 			items = append(items, comparePropMaps(base, cur, tok+" input", bfn.Inputs.Properties, cfn.Inputs.Properties)...)

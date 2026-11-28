@@ -533,6 +533,8 @@ enforces because `tokens.txt` is blind to them):
 - ★ Adding a **new required input** to an existing resource/function (growth of
   `requiredInputs`), or making an existing optional input required.
 - ★ **Removing an output property** from an existing resource/function.
+- ★ **Removing an input property** from an existing resource/function (for example
+  making it output only): every program that sets it breaks.
 - ★ **Type narrowing** of an existing property (`string` → enum; enum **value
   removal**; array → scalar).
 - ★ **`replaceOnChanges` add** on an existing property (silently converts an

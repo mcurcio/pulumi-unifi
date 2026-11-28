@@ -1,6 +1,7 @@
 package gen
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
@@ -288,5 +289,42 @@ func TestBreakingDeltaFollowsAliases(t *testing.T) {
 	items := detectBreakingDelta(base, cur)
 	if len(items) != 1 || items[0].String() != "added-required-input: m:New.b" {
 		t.Errorf("items = %v, want exactly [added-required-input: m:New.b] (the rename is followed; an unaliased removal is left to the byte golden)", items)
+	}
+}
+
+// A dropped input (an outputOnly: entry, or a removed property) breaks every
+// program that sets it, so it is flagged like an added required input, and
+// through an alias too (review finding: `index` left the inputs unflagged).
+func TestBreakingDeltaFlagsRemovedInput(t *testing.T) {
+	str := pschema.PropertySpec{TypeSpec: pschema.TypeSpec{Type: "string"}}
+	props := map[string]pschema.PropertySpec{"a": str, "index": str}
+	base := pschema.PackageSpec{
+		Resources: map[string]pschema.ResourceSpec{
+			"m:Old":  {ObjectTypeSpec: pschema.ObjectTypeSpec{Properties: props}, InputProperties: props},
+			"m:Same": {ObjectTypeSpec: pschema.ObjectTypeSpec{Properties: props}, InputProperties: props},
+		},
+		Functions: map[string]pschema.FunctionSpec{
+			"m:getX": {Inputs: &pschema.ObjectTypeSpec{Properties: map[string]pschema.PropertySpec{"a": str, "b": str}}},
+		},
+	}
+	only := map[string]pschema.PropertySpec{"a": str}
+	cur := pschema.PackageSpec{
+		Resources: map[string]pschema.ResourceSpec{
+			"m:New": {ObjectTypeSpec: pschema.ObjectTypeSpec{Properties: props}, InputProperties: only,
+				Aliases: []pschema.AliasSpec{{Type: "m:Old"}}},
+			"m:Same": {ObjectTypeSpec: pschema.ObjectTypeSpec{Properties: props}, InputProperties: props},
+		},
+		Functions: map[string]pschema.FunctionSpec{
+			"m:getX": {Inputs: &pschema.ObjectTypeSpec{Properties: only}},
+		},
+	}
+	var got []string
+	for _, it := range detectBreakingDelta(base, cur) {
+		got = append(got, it.String())
+	}
+	sort.Strings(got)
+	want := []string{"removed-input: m:New.index", "removed-input: m:getX input.b"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("items = %v, want %v", got, want)
 	}
 }
