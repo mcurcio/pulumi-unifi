@@ -276,10 +276,13 @@ func (p *cli) run(args ...string) (string, error) {
 	start := time.Now()
 	err := cmd.Run()
 	p.t.Logf("$ pulumi %s (%s)", strings.Join(args, " "), time.Since(start).Round(time.Second))
-	// Keep every transcript for diagnosis; the e2e uses no secrets.
+	// Keep every transcript for diagnosis. In edge mode the seed key sits in
+	// the child environment (never in config or on the command line), so a
+	// transcript should never hold it; scrubKey removes it all the same, in
+	// case a later change dumps the environment or the provider config.
 	f, ferr := os.OpenFile(p.logs, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if ferr == nil {
-		fmt.Fprintf(f, "\n$ pulumi %s\n%s%s", strings.Join(args, " "), out.String(), errb.String())
+		fmt.Fprint(f, scrubKey(fmt.Sprintf("\n$ pulumi %s\n%s%s", strings.Join(args, " "), out.String(), errb.String()), os.Getenv("UNIFI_APIKEY")))
 		f.Close()
 	}
 	if err != nil {
@@ -910,4 +913,13 @@ func childEnv(keepKey bool) []string {
 		}
 	}
 	return out
+}
+
+// scrubKey replaces every occurrence of key in s; an empty key (pre-wizard
+// mode) leaves s as it is.
+func scrubKey(s, key string) string {
+	if key == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, key, "[redacted]")
 }

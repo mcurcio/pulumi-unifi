@@ -117,7 +117,8 @@ fi
 
 # Confirm the key authorizes BEFORE we bother snapshotting (expect real JSON).
 echo "==> verifying the pasted key authorizes (expect a JSON body)"
-body=$(curl -sk --max-time 5 -H "X-API-KEY: $KEY" "$MINT_API" 2>/dev/null || true)
+# The header goes in on stdin (printf is a builtin), never in curl's argv.
+body=$(printf 'X-API-KEY: %s\n' "$KEY" | curl -sk --max-time 5 -H @- "$MINT_API" 2>/dev/null || true)
 case "$body" in
   '{'*) echo "    key authorizes (got JSON)" ;;
   *) echo "ERROR: the pasted key did not authorize (no JSON body). Re-check the" >&2

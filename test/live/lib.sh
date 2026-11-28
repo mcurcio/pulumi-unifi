@@ -132,7 +132,8 @@ live_wait_ready() {
   start=$(date +%s)
   live_log "waiting for authenticated JSON on $url (limit 20 min)"
   while [ $(( $(date +%s) - start )) -lt 1200 ]; do
-    body=$(curl -sk --max-time 5 -H "X-API-KEY: $UNIFI_APIKEY" "$url" 2>/dev/null || true)
+    # The header goes in on stdin (printf is a builtin), never in curl's argv.
+    body=$(printf 'X-API-KEY: %s\n' "$UNIFI_APIKEY" | curl -sk --max-time 5 -H @- "$url" 2>/dev/null || true)
     case "$body" in
       '{'*'"data"'*) live_log "controller ready after $(( $(date +%s) - start ))s"; return 0 ;;
     esac
