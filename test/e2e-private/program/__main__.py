@@ -6,7 +6,11 @@ from stack config so one program serves every step:
   prefix  unique name prefix for this run (every object carries it)
   step    1: the initial declaration; 2: managed fields changed or dropped
   mode    "main" (the 4 kinds) or "import" (the objects a fresh stack adopts
-          by natural key; declared exactly as step 2 declares them)
+          by natural key; declared exactly as step 2 declares them); edge mode
+          only (docs/design/private-binding.md §S2.8, §S2.11): "classic" (the
+          classic UserGroup and the SettingNtp singleton, steps 1-3),
+          "classic-import" (both, as step 2 declares them, in a fresh stack)
+          and "classic-dup" (a UserGroup whose name is taken)
 
 The provider config comes from the driver's stack config: in direct mode the
 Network application before the setup wizard (unifi:networkBaseUrl, no
@@ -57,7 +61,38 @@ def app_block(name: str) -> unifi.network.FirewallAppBlock:
     )
 
 
-if mode == "import":
+def user_group(name: str) -> unifi.network.UserGroup:
+    # step 1: a download limit; step 2: changed; step 3: dropped (G-Q1: reset
+    # to the recorded default -1, no limit).
+    args = {} if step == 3 else {"qos_rate_max_down": 500 if step == 1 else 800}
+    return unifi.network.UserGroup(name, name=f"{prefix}-ug", **args)
+
+
+def setting_ntp(name: str) -> unifi.network.SettingNtp:
+    # One per site: create adopts it, destroy releases it. step 3 drops both
+    # managed fields: setting_preference resets to "auto", and with "auto" the
+    # controller puts its own servers back (measured), so ntp_server1 is
+    # dropped with it and resets to that recorded default.
+    if step == 3:
+        return unifi.network.SettingNtp(name)
+    return unifi.network.SettingNtp(
+        name,
+        setting_preference="manual",
+        ntp_server1="time-e2e-1.example.invalid" if step == 1 else "time-e2e-2.example.invalid")
+
+
+if mode == "classic":
+    ug = user_group("ug")
+    ntp = setting_ntp("ntp")
+    pulumi.export("ids", {"ug": ug.id, "ntp": ntp.id})
+elif mode == "classic-import":
+    ug = user_group("ug-imported")
+    ntp = setting_ntp("ntp-imported")
+    pulumi.export("ids", {"ug": ug.id, "ntp": ntp.id})
+elif mode == "classic-dup":
+    ug = user_group("ug-dup")
+    pulumi.export("ids", {"ug": ug.id})
+elif mode == "import":
     # An import adopts the natural key + required fields; app_ids and
     # schedule.time_all_day are declared beyond that, at their live values,
     # so they must preview as no change either.

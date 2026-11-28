@@ -157,6 +157,52 @@ func (c *ctl) put(k kind, id string, edit func(map[string]any)) {
 	}
 }
 
+// classic sends one raw classic request (/api/s/<site>/<path>) and returns
+// the envelope's data.
+func (c *ctl) classic(method, path string, body any) (int, []map[string]any) {
+	c.t.Helper()
+	code, b := c.doURL(method, c.base+"/api/s/"+site+"/"+path, body, true)
+	var env struct {
+		Meta map[string]any   `json:"meta"`
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(b, &env); err != nil {
+		c.t.Fatalf("%s classic %s: %d %.300s", method, path, code, b)
+	}
+	return code, env.Data
+}
+
+// classicGet lists a classic collection and returns the object with the id.
+func (c *ctl) classicGet(path, id string) map[string]any {
+	c.t.Helper()
+	code, data := c.classic("GET", path, nil)
+	if code != 200 {
+		c.t.Fatalf("GET classic %s: %d", path, code)
+	}
+	for _, o := range data {
+		if fmt.Sprint(o["_id"]) == id {
+			return o
+		}
+	}
+	return nil
+}
+
+// classicPut merges edit into the live classic object (the way the UniFi UI
+// or a script would change it).
+func (c *ctl) classicPut(path, id string, edit map[string]any) {
+	c.t.Helper()
+	o := c.classicGet(path, id)
+	if o == nil {
+		c.t.Fatalf("classic %s: no object %s", path, id)
+	}
+	for k, v := range edit {
+		o[k] = v
+	}
+	if code, _ := c.classic("PUT", path+"/"+id, o); code != 200 {
+		c.t.Fatalf("raw classic PUT %s/%s: %d", path, id, code)
+	}
+}
+
 // withPrefix lists the objects of k whose name starts with prefix.
 func (c *ctl) withPrefix(k kind, prefix string) []map[string]any {
 	var out []map[string]any
@@ -611,6 +657,239 @@ func TestPrivateE2E(t *testing.T) {
 			}
 		}
 		p.must("stack", "rm", "main", "--yes")
+	})
+
+	if mode == "edge" {
+		classicSteps(t, c, p, prefix, stackInit, step)
+	}
+}
+
+// classicSteps are the classic rows of the edge tier
+// (docs/design/private-binding.md §S2.8, §S2.11): the classic UserGroup
+// (create, refresh no-op, update keeps unmanaged, managed drift, duplicate
+// name refused, import by name, drop-reset, destroy) and the SettingNtp
+// singleton (adopt, change, no-op, drift, drop-reset, destroy = release),
+// after which the original ntp settings are put back and checked by re-read.
+func classicSteps(t *testing.T, c *ctl, p *cli, prefix string, stackInit func(string, map[string]string), step func(*testing.T, string, func(*testing.T))) {
+	const ug, ntp = "rest/usergroup", "rest/setting/ntp"
+	code, docs := c.classic("GET", ntp, nil)
+	if code != 200 || len(docs) != 1 {
+		t.Fatalf("GET %s: %d, %d documents; want the one ntp document", ntp, code, len(docs))
+	}
+	original := docs[0]
+	ntpID := fmt.Sprint(original["_id"])
+	restored, destroyed := false, false
+	restore := func(t *testing.T) {
+		if code, _ := c.classic("PUT", ntp+"/"+ntpID, original); code != 200 {
+			t.Errorf("restoring the ntp settings: HTTP %d", code)
+			return
+		}
+		got := c.classicGet(ntp, ntpID)
+		for k, v := range original {
+			if fmt.Sprint(got[k]) != fmt.Sprint(v) {
+				t.Errorf("ntp settings after the restore: %s = %v, want %v", k, got[k], v)
+			}
+		}
+		restored = true
+	}
+	t.Cleanup(func() {
+		if !destroyed {
+			_, _ = p.run("destroy", "--yes", "--skip-preview", "-s", "classic")
+		}
+		_, groups := c.classic("GET", ug, nil)
+		for _, o := range groups {
+			if n, _ := o["name"].(string); strings.HasPrefix(n, prefix) {
+				code, _ := c.classic("DELETE", ug+"/"+fmt.Sprint(o["_id"]), nil)
+				t.Logf("swept leftover usergroup %v: %d", o["name"], code)
+				if destroyed {
+					t.Errorf("destroy left usergroup %v behind", o["name"])
+				}
+			}
+		}
+		if !restored {
+			restore(t)
+		}
+	})
+	groupsNamed := func(name string) []map[string]any {
+		_, all := c.classic("GET", ug, nil)
+		var out []map[string]any
+		for _, o := range all {
+			if o["name"] == name {
+				out = append(out, o)
+			}
+		}
+		return out
+	}
+	stackOut := func(stack string) map[string]string {
+		var o struct {
+			IDs map[string]string `json:"ids"`
+		}
+		if err := json.Unmarshal([]byte(p.must("stack", "output", "--json", "-s", stack)), &o); err != nil {
+			t.Fatal(err)
+		}
+		return o.IDs
+	}
+	stackInit("classic", map[string]string{
+		"unifi-e2e-private:prefix": prefix,
+		"unifi-e2e-private:step":   "1",
+		"unifi-e2e-private:mode":   "classic",
+	})
+	var ugID string
+	step(t, "7-classic-create-and-adopt", func(t *testing.T) {
+		p.must("up", "--yes", "--skip-preview", "-s", "classic")
+		ids := stackOut("classic")
+		if ids["ntp"] != "private:"+ntpID {
+			t.Fatalf("SettingNtp id %q, want private:%s (adopted, not created)", ids["ntp"], ntpID)
+		}
+		ugID = strings.TrimPrefix(ids["ug"], "private:")
+		g := c.classicGet(ug, ugID)
+		if g == nil || g["name"] != prefix+"-ug" || fmt.Sprint(g["qos_rate_max_down"]) != "500" {
+			t.Fatalf("usergroup after create: %v", g)
+		}
+		if _, docs := c.classic("GET", ntp, nil); len(docs) != 1 {
+			t.Fatalf("adopt must not create a second ntp document: %d", len(docs))
+		}
+		expect(t, "ntp", c.classicGet(ntp, ntpID), map[string]any{
+			"setting_preference": "manual", "ntp_server_1": "time-e2e-1.example.invalid",
+			"ntp_server_2": original["ntp_server_2"], // unmanaged, kept
+		})
+	})
+
+	step(t, "8-classic-read-noop", func(t *testing.T) {
+		p.must("refresh", "--yes", "--skip-preview", "-s", "classic")
+		p.must("preview", "--expect-no-changes", "-s", "classic")
+		p.must("up", "--yes", "--expect-no-changes", "-s", "classic")
+	})
+
+	step(t, "9-classic-update-keeps-unmanaged", func(t *testing.T) {
+		c.classicPut(ug, ugID, map[string]any{"qos_rate_max_up": 250})
+		c.classicPut(ntp, ntpID, map[string]any{"ntp_server_2": "time-e2e-unmanaged.example.invalid"})
+		p.must("config", "set", "-s", "classic", "unifi-e2e-private:step", "2")
+		p.must("up", "--yes", "--skip-preview", "-s", "classic")
+		if got := strings.TrimPrefix(stackOut("classic")["ug"], "private:"); got != ugID {
+			t.Errorf("usergroup replaced (%s -> %s); want an in-place update", ugID, got)
+		}
+		expect(t, "usergroup", c.classicGet(ug, ugID), map[string]any{
+			"qos_rate_max_down": 800, "qos_rate_max_up": 250, // managed changed, unmanaged kept
+		})
+		expect(t, "ntp", c.classicGet(ntp, ntpID), map[string]any{
+			"ntp_server_1": "time-e2e-2.example.invalid", "ntp_server_2": "time-e2e-unmanaged.example.invalid",
+			"setting_preference": "manual",
+		})
+		p.must("preview", "--refresh", "--expect-no-changes", "-s", "classic")
+	})
+
+	step(t, "10-classic-managed-drift-shows", func(t *testing.T) {
+		c.classicPut(ug, ugID, map[string]any{"qos_rate_max_down": 999})
+		c.classicPut(ntp, ntpID, map[string]any{"ntp_server_1": "time-e2e-drift.example.invalid"})
+		ch := changes(t, p.must("preview", "--refresh", "--json", "-s", "classic"))
+		got := map[string][]string{}
+		for _, s := range ch {
+			if s.Op != "update" {
+				t.Errorf("drift: op %s on %s, want update", s.Op, s.URN)
+			}
+			var dd []string
+			for k := range s.DetailedDiff {
+				dd = append(dd, k)
+			}
+			sort.Strings(dd)
+			got[s.URN[strings.LastIndex(s.URN, "::")+2:]] = dd
+		}
+		if !reflect.DeepEqual(got, map[string][]string{"ug": {"qosRateMaxDown"}, "ntp": {"ntpServer1"}}) {
+			t.Fatalf("drift: %v; want ug qosRateMaxDown and ntp ntpServer1", got)
+		}
+		p.must("up", "--yes", "--skip-preview", "--refresh", "-s", "classic")
+		expect(t, "usergroup", c.classicGet(ug, ugID), map[string]any{"qos_rate_max_down": 800, "qos_rate_max_up": 250})
+		expect(t, "ntp", c.classicGet(ntp, ntpID), map[string]any{"ntp_server_1": "time-e2e-2.example.invalid"})
+		p.must("preview", "--expect-no-changes", "-s", "classic")
+	})
+
+	step(t, "11-classic-duplicate-name-refused", func(t *testing.T) {
+		// The classic API accepts a duplicate name (probe f1); the provider
+		// refuses it (rule 3) and names the object to import instead.
+		stackInit("cdup", map[string]string{
+			"unifi-e2e-private:prefix": prefix,
+			"unifi-e2e-private:step":   "2",
+			"unifi-e2e-private:mode":   "classic-dup",
+		})
+		defer p.run("stack", "rm", "cdup", "--force", "--yes")
+		out, err := p.run("up", "--yes", "--skip-preview", "-s", "cdup")
+		if err == nil || !strings.Contains(out, "already exists (id private:"+ugID+")") {
+			t.Fatalf("up of a taken name: err %v; want the already-exists refusal\n%s", err, tail(out, 20))
+		}
+		if n := len(groupsNamed(prefix + "-ug")); n != 1 {
+			t.Fatalf("%d usergroups named %s-ug, want 1", n, prefix)
+		}
+	})
+
+	step(t, "12-classic-import", func(t *testing.T) {
+		stackInit("cimp", map[string]string{
+			"unifi-e2e-private:prefix": prefix,
+			"unifi-e2e-private:step":   "2",
+			"unifi-e2e-private:mode":   "classic-import",
+		})
+		defer p.run("stack", "rm", "cimp", "--force", "--yes") // leaves both to "classic"
+		p.must("import", "unifi:network:UserGroup", "ug-imported", prefix+"-ug",
+			"--yes", "--protect=false", "--generate-code=false", "--skip-preview", "-s", "cimp")
+		p.must("import", "unifi:network:SettingNtp", "ntp-imported", "ntp",
+			"--yes", "--protect=false", "--generate-code=false", "--skip-preview", "-s", "cimp")
+		var st struct {
+			Deployment struct {
+				Resources []struct {
+					URN string `json:"urn"`
+					ID  string `json:"id"`
+				} `json:"resources"`
+			} `json:"deployment"`
+		}
+		if err := json.Unmarshal([]byte(p.must("stack", "export", "-s", "cimp")), &st); err != nil {
+			t.Fatal(err)
+		}
+		found := map[string]string{}
+		for _, r := range st.Deployment.Resources {
+			for _, key := range []string{"ug", "ntp"} {
+				if strings.HasSuffix(r.URN, "::"+key+"-imported") {
+					found[key] = r.ID
+				}
+			}
+		}
+		if found["ug"] != "private:"+ugID || found["ntp"] != "private:"+ntpID {
+			t.Fatalf("imported ids %v; want private:%s and private:%s", found, ugID, ntpID)
+		}
+		p.must("preview", "--expect-no-changes", "-s", "cimp")
+	})
+
+	step(t, "13-classic-drop-resets", func(t *testing.T) {
+		// G-Q1: a managed field the program drops resets to its default.
+		p.must("config", "set", "-s", "classic", "unifi-e2e-private:step", "3")
+		p.must("up", "--yes", "--skip-preview", "-s", "classic")
+		expect(t, "usergroup", c.classicGet(ug, ugID), map[string]any{"qos_rate_max_down": -1, "qos_rate_max_up": 250})
+		// Both ntp fields are dropped: back to "auto", and the first server to
+		// the value the controller itself restores in auto mode (the seed's).
+		expect(t, "ntp", c.classicGet(ntp, ntpID), map[string]any{
+			"setting_preference": "auto", "ntp_server_1": original["ntp_server_1"],
+		})
+		p.must("preview", "--refresh", "--expect-no-changes", "-s", "classic")
+	})
+
+	step(t, "14-classic-destroy-releases", func(t *testing.T) {
+		before := c.classicGet(ntp, ntpID)
+		p.must("destroy", "--yes", "--skip-preview", "-s", "classic")
+		destroyed = true
+		if n := len(groupsNamed(prefix + "-ug")); n != 0 {
+			t.Errorf("after destroy, %d usergroups named %s-ug remain", n, prefix)
+		}
+		// Release: the settings stay as the stack left them.
+		after := c.classicGet(ntp, ntpID)
+		if after == nil {
+			t.Fatal("destroy must not delete the ntp settings")
+		}
+		for k, v := range before {
+			if fmt.Sprint(after[k]) != fmt.Sprint(v) {
+				t.Errorf("destroy changed ntp %s: %v -> %v; want it released as is", k, v, after[k])
+			}
+		}
+		p.must("stack", "rm", "classic", "--yes")
+		restore(t)
 	})
 }
 

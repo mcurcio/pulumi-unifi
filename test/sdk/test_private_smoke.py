@@ -51,3 +51,12 @@ def test_provider_has_network_base_url():
     _network()
     params = inspect.signature(pulumi_unifi.ProviderArgs.__init__).parameters
     assert "network_base_url" in params
+
+
+def test_ipv6_acl_rule_served_only_with_its_token():
+    # unifi:network:AclRuleIpv6 (the G-Q4 variant exception) is generated only
+    # from the first Network version that accepts IPv6 ACL rules; on the 10.4.57
+    # pin it is not served, so it is not in tokens.txt and not in the SDK
+    # (docs/design/private-binding.md §S2.7).
+    net = _network()
+    assert hasattr(net, "AclRuleIpv6") == ("AclRuleIpv6" in _classes())

@@ -194,8 +194,13 @@ against this seeded, wizard-completed controller
 `https://127.0.0.1:11443/proxy/network` with the seed's key, the stack config
 holding only `unifi:apiHost`, `unifi:allowInsecure=true` and `unifi:siteId=default`.
 A first step checks that the edge refuses the private API without the key (401),
-so the rest proves key-authenticated private reads and writes. The key reaches
-the driver and the provider as `UNIFI_APIKEY` in the environment only.
+so the rest proves key-authenticated private reads and writes. Then the classic
+kinds (§S2.8): `UserGroup` (create, no-op, update, drift, duplicate name
+refused, import by name, drop-reset, destroy) and the `SettingNtp` singleton
+(adopt, update, drift, import by `ntp`, drop-reset, destroy releases it); the
+run captures the seed's ntp document first and puts it back, checked by re-read.
+The key reaches the driver and the provider as `UNIFI_APIKEY` in the environment
+only.
 
 ### Sandbox workarounds (`test/live/`)
 

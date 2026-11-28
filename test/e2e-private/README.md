@@ -40,8 +40,22 @@ with `E2E_MODE=edge`, `E2E_API_HOST=127.0.0.1:11443` and the seed's throwaway ke
 stacks then set `unifi:apiHost`, `unifi:allowInsecure=true` and `unifi:siteId=default` (no
 `networkBaseUrl`), so the provider reaches the private API at `https://<apiHost>/proxy/network`
 with the same key as the official API; the raw checks go the same way. Step 0 checks that the edge
-answers 401 without the key. Steps 1-6 are the table below. This tier (direct mode) is unchanged:
-pre-wizard, no key, the only live tier that needs no seed.
+answers 401 without the key. Steps 1-6 are the table below. Edge mode then runs steps 7-14 for
+the classic kinds (`docs/design/private-binding.md` §S2.8), on their own stacks:
+
+| Step | `UserGroup` (classic `rest/usergroup`) | `SettingNtp` (classic singleton `rest/setting/ntp`) |
+|---|---|---|
+| 7 create | created; raw GET shows the declared limit | **adopted**: the id is the existing document's, no second document |
+| 8 read no-op | refresh, `preview --expect-no-changes`, `up --expect-no-changes` | same |
+| 9 update | managed field changed, an unmanaged one set raw is kept, same id | same |
+| 10 drift | a raw change of a managed field shows as one update on it; `up --refresh` restores it | same |
+| 11 duplicate | a second stack declaring the same name fails "already exists (id private:…)"; still one group | — |
+| 12 import | `pulumi import` by name, same id, no changes | `pulumi import … ntp`, same id, no changes |
+| 13 drop | dropped limit resets to -1 | dropped fields reset (`auto`; the controller puts its own servers back in `auto`) |
+| 14 destroy | deleted | **released**: values left as they were; then the run puts the original document back and checks it by re-read |
+
+`AclRuleIpv6` has no live rows: it is not served on this pin (§S2.7). This tier (direct mode) is
+unchanged: pre-wizard, no key, the only live tier that needs no seed.
 
 ## What `run.sh` does
 
