@@ -3,14 +3,15 @@
 **Status:** Part 1 (§0-§14) is the decided and built design for the first private-API slice: built,
 measured and green (§14). Part 2 (§S2.0-§S2.14) is the **decided design for slice 2 and the official
 ACL rule writes**, from the owner's decisions of 2026-11-28 and the slice 2 probe. Its build step 1
-(official ACL rules, their ordering, the rename with aliases) is built and measured live; the rest is
-not built yet (§S2.14).
+(official ACL rules, their ordering, the rename with aliases) and the slice-2 transport with the seeded
+tier (design step 4: private writes through the authenticated edge with the one key, the version guard,
+`make test-e2e-edge`) are built and measured live; the rest is not built yet (§S2.14).
 Both implement the agreed frame (`docs/design/private-api-provider-frame.md` on
 `docs/two-api-provider-frame`: one provider over two APIs, rules 1-3, G-Q1, natural keys, stored ids
 that name their API, whole-kind serving, with the one variant exception of §S2.7). The evidence is
 `docs/research/private-api-model-source.md`. **Where am I:** slice 1 Implementation done; slice 2
 Implementation in progress on this branch: step 1 done (with the ordering of step 3 pulled in, §S2.14
-row 1), steps 2 and 4-6 next.
+row 1); step 4 done ahead of step 2 (§S2.14 row 15); steps 2, 5 and 6 next.
 
 ## 0. How this was chosen
 
@@ -591,3 +592,8 @@ Filled in as each step of §S2.12 is built and measured, in the format of §14.
 | 12 | §S2.11 `test-e2e`: a v2-created IPV4 rule stays included | The v2 rule is created with `acl_index` = the current rule count | A taken `acl_index` ties with a managed rule and can move ahead of it (probe d2), which is drift the test would then (correctly) report |
 | 13 | §S2.4: alias migration proven live, else documented as `pulumi state` steps | Proven live: the old-token state previews `2 unchanged` with `--expect-no-changes`, `up` reports `2 unchanged` and rewrites the state to `AclRuleIpv4`, the rule keeps its id | — |
 | 14 | Not in the design | `Makefile` `test-mock` readiness probe: `$(curl … \|\| echo 000)` became `000000` on a refused connection and passed the gate before Prism was up; now `\|\| true` | Pre-existing bug, hit in this step (every mock test answered 502) |
+| 15 | §S2.12: step 4 (edge and the seeded tier) after the step-2 layer move | Built before step 2, in the current packages: the private binding stays in `provider/pkg/private/binding` but sends through `controller.Client.Send` (TLS policy, `X-API-Key`, 429 retry); the dispatcher builds **one** `controller.Client` per Configure that the private binding and the ordering's official binding share, and points the private binding at `controller.NetworkRoot()` (the `networkBaseUrl` override, else `https://<apiHost>/proxy/network`). `provider.InsecureTransport` is no longer used by the private side (now unexported, framework only) | The build step of this run was the slice-2 transport and seeded tier. The wire moved to L1 where §S2.2 puts it, so step 2 moves packages without changing the transport again |
+| 16 | §S2.2: the version probe sits in `controller` (L1) | `binding.Client.NetworkVersion` reads classic `stat/sysinfo` (the classic path and envelope are L2 knowledge); the guard is a `Binding` decorator in the dispatcher (`private/guard.go`), so the engine never sees it. Success or mismatch is cached until the next Configure; a read failure is not cached (the next call retries). The comparison accepts the pin exactly or followed by a non-digit suffix | Keeps paths and envelopes out of L1. Measured: both the pre-wizard Network app (`:8081`, unauthenticated) and the seeded edge (with the key) answer `stat/sysinfo` 200 with `version` `10.4.57` (and a separate `build` field), so the guard runs on both paths, including the unchanged `test-e2e-private` |
+| 17 | §S2.6: `SiteResolver` turns a site name into the UUID | It also maps a UUID `siteId` to the site name (`internalReference`) the private paths take (`SiteResolver.Name`), lazily: a name costs no call, a UUID one cached `GET /v1/sites`; with no key a UUID is used as given (the pre-wizard path). Forwarding a resolved UUID to the framework (row 8) is still not built | A UUID-configured stack (as the official resources need today) would otherwise send the UUID in private paths, which take the name (probe e) |
+| 18 | §S2.10: new targets `make test-e2e-edge` and `make test-live` with the `test/e2e-private` driver in an edge mode | As designed, through `E2E_DRIVERS` (`grpc`, `cli`, `edge`) in `test/e2e/run.sh` rather than a new script; `edge` runs last because it rebuilds the plugin and SDK with `PRIVATE=1`. The driver gained `E2E_MODE=edge` (`E2E_API_HOST`, the key in `UNIFI_APIKEY` passed to the CLI's environment only, raw checks through the edge with the key) and a step 0: the edge answers 401 to the private v2 and classic APIs without the key and 200 with it | One boot recipe and one driver; step 0 makes the rest a proof of key-authenticated private writes, not of an open port |
+| 19 | Not in the design | A private-API 401/403 error adds what to configure (`unifi:apiKey` for the edge; `networkBaseUrl` only for a pre-wizard Network app), and an HTML error page (the edge's) is reduced to its status text; the key never appears | The edge answers 401 with an HTML page; the previous error printed up to 2000 bytes of it |

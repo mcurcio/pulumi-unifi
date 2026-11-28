@@ -87,7 +87,12 @@ fills `{siteId}`, defaults to `default`), `allowInsecure` (env `UNIFI_ALLOW_INSE
 off). With `allowInsecure` off, trust the controller CA at the OS level or via `SSL_CERT_FILE` (HTTP
 client byte-for-byte unchanged). `allowInsecure=true` replaces the transport to skip TLS verification
 for self-signed certs — **caveat:** the framework's 429 rate-limit retry wrapper is unexported, so the
-insecure path loses automatic 429 retry.
+insecure path loses automatic 429 retry (framework resources only: the engine-served kinds use the
+`provider/pkg/controller` client, which retries 429 on both TLS paths). At `PRIVATE=1` the private kinds
+use the **same** `apiKey`/`apiHost`/`allowInsecure` through the authenticated edge
+`https://<apiHost>/proxy/network` (v2 and classic, no login); `networkBaseUrl` (private fragment only)
+overrides that root for the pre-wizard Network app, and a version guard fails the private kinds (only)
+when the controller's Network version is not the pin's.
 
 ## Commands
 
@@ -129,6 +134,10 @@ Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
   builds the `PRIVATE=1` plugin + SDK, boots UniFi OS Server from the **same pinned installer's** image
   (no wizard, no key, no `hieutq`), and drives the Pulumi CLI through create/read/no-op/update/drift/
   import/destroy for the 4 `unifi:network:*` kinds. See `test/e2e-private/README.md`.
+- **Edge tier — `make test-e2e-edge`** (Tier-2 seed + the pinned installer; OFFLINE/local): the same
+  private driver in edge mode on the seeded, wizard-completed controller, through the authenticated
+  edge with the seed's key (`E2E_DRIVERS=edge test/e2e/run.sh`). `make test-live` runs the gRPC, CLI
+  and edge drivers on one boot.
 
 ## Gotchas
 
