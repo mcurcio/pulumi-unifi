@@ -224,3 +224,42 @@ func TestDeleteReleases(t *testing.T) {
 		t.Errorf("delete must not call the API (puts %v) and must warn (%q)", f.puts, warned)
 	}
 }
+
+// With REJECT, an unmanaged entry added after create must show on refresh, so
+// that the next update fails in Compose and names it (review finding: Read
+// projected only the first n ids, so REJECT never fired after create).
+func TestRejectShowsUnlistedAfterCreateAsDrift(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeOrder{live: []string{"r1", "r2"}}
+	o := &Ordering{Binding: f}
+	prog := in(ids("r1", "r2"), UnlistedReject)
+	c, err := o.Create(ctx, sg, prog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No unlisted entry: the refresh is a no-op.
+	r, err := o.ReadOrder(ctx, sg, c.ID, prog, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := o.DiffInputs(sg, r.Inputs, prog); len(d.Changed) != 0 {
+		t.Fatalf("no unlisted entry: diff %v, want none", d.Changed)
+	}
+	f.live = append(f.live, "x") // created elsewhere, in the tail
+	r, err = o.ReadOrder(ctx, sg, c.ID, prog, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := o.DiffInputs(sg, r.Inputs, prog)
+	if len(d.Changed) == 0 || d.Changed[0] != "orderedAclRuleIds" {
+		t.Fatalf("unlisted tail entry with REJECT: diff %v, want orderedAclRuleIds changed", d.Changed)
+	}
+	if _, err := o.Update(ctx, sg, c.ID, prog); err == nil || !strings.Contains(err.Error(), "x") {
+		t.Fatalf("update after drift: err %v, want REJECT naming x", err)
+	}
+	// LAST keeps the tail out of the projection.
+	r, _ = o.ReadOrder(ctx, sg, c.ID, in(ids("r1", "r2"), UnlistedLast), false)
+	if d := o.DiffInputs(sg, r.Inputs, in(ids("r1", "r2"), UnlistedLast)); len(d.Changed) != 0 {
+		t.Fatalf("LAST: diff %v, want none", d.Changed)
+	}
+}

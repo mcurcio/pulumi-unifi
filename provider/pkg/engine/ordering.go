@@ -160,7 +160,8 @@ func Compose(managed, live []string, unlisted string) ([]string, error) {
 // Project is the managed list as read back: the first n live ids, n being the
 // number the program manages (rule 1 for a list whose position is managed).
 // Drift shows when an unmanaged entry moves ahead of a managed one, when the
-// managed ones are reordered, or when a managed one is gone.
+// managed ones are reordered, or when a managed one is gone. With REJECT,
+// ReadOrder projects the whole live order, so any unlisted entry is drift.
 func Project(live []string, n int) []string {
 	if n > len(live) {
 		n = len(live)
@@ -282,7 +283,14 @@ func (o *Ordering) ReadOrder(ctx context.Context, s *Singleton, id string, in re
 			inputs[k] = v
 		}
 		managed, _ := stringList(in[resource.PropertyKey(s.Property)])
-		inputs[resource.PropertyKey(s.Property)] = strings2(Project(live, len(managed)))
+		n := len(managed)
+		// With REJECT the program claims the whole order, so the projection
+		// is the whole live order: an unlisted entry anywhere is drift, and
+		// the next update fails in Compose naming it.
+		if unlistedOf(in) == UnlistedReject {
+			n = len(live)
+		}
+		inputs[resource.PropertyKey(s.Property)] = strings2(Project(live, n))
 	}
 	proj, _ := stringList(inputs[resource.PropertyKey(s.Property)])
 	return &Read{ID: o.StoredID(siteID), Inputs: inputs, Outputs: outputs(s, inputs, proj, live)}, nil
