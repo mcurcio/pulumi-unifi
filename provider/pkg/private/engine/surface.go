@@ -52,9 +52,41 @@ type Kind struct {
 	CreateList bool   `json:"createList,omitempty"`
 	IDField    string `json:"idField"`
 	Envelope   string `json:"envelope"`
-	// NaturalKey lists wire paths (rule 3).
-	NaturalKey []string          `json:"naturalKey"`
-	Fields     map[string]*Field `json:"fields"` // by wire name; the id field is not here
+	// NaturalKey lists wire paths (rule 3). Empty for a singleton.
+	NaturalKey []string `json:"naturalKey"`
+	// Shape is "collection" (empty) or "singleton": one document per site,
+	// read from ListPath, that Create adopts and Delete releases
+	// (private-binding.md §S2.8).
+	Shape string `json:"shape,omitempty"`
+	// SingletonKey is a singleton's import id besides its stored id (the
+	// settings section name, "ntp").
+	SingletonKey string `json:"singletonKey,omitempty"`
+	// Variant pins one discriminator value (the G-Q4 variant exception,
+	// §S2.7): sent on create and update, kept in lists and natural-key
+	// lookups, checked on every read. The discriminator is not a Field.
+	Variant *Variant `json:"variant,omitempty"`
+	// CreateDefaults are wire values sent on create when the inputs lack
+	// them, never managed afterwards (§S2.7, `acl_index`).
+	CreateDefaults map[string]json.RawMessage `json:"createDefaults,omitempty"`
+	// OfficialTokens names the official tokens that serve the kind's other
+	// variants, for the changed-variant error.
+	OfficialTokens []string          `json:"officialTokens,omitempty"`
+	Fields         map[string]*Field `json:"fields"` // by wire name; the id field is not here
+}
+
+// Shapes of a kind.
+const (
+	ShapeCollection = "collection"
+	ShapeSingleton  = "singleton"
+)
+
+// IsSingleton says whether the kind is one document per site.
+func (k *Kind) IsSingleton() bool { return k.Shape == ShapeSingleton }
+
+// Variant is a pinned discriminator value.
+type Variant struct {
+	Field string `json:"field"`
+	Value string `json:"value"`
 }
 
 // Field is one field of an exposed kind.
@@ -80,6 +112,9 @@ type Field struct {
 	Secret      bool            `json:"secret,omitempty"`
 	CreateOnly  bool            `json:"createOnly,omitempty"`
 	NotReturned bool            `json:"notReturned,omitempty"`
+	// OutputOnly: owned by the server; an output, never an input, and kept at
+	// its live value in a PUT body (unlike ReadOnly, which is not sent).
+	OutputOnly bool `json:"outputOnly,omitempty"`
 }
 
 // Constraints are the checkable validation facts.
@@ -123,6 +158,18 @@ func ParseSurface(b []byte) (*Surface, error) {
 		}
 		if k.IDField == "" || k.ItemPath == "" || !strings.Contains(k.ItemPath, "{id}") {
 			return nil, fmt.Errorf("private.json: %s has no id field or item path", k.Token)
+		}
+		switch k.Shape {
+		case "", ShapeCollection:
+		case ShapeSingleton:
+			if !k.ListGet || len(k.NaturalKey) != 0 || k.Variant != nil {
+				return nil, fmt.Errorf("private.json: singleton %s needs a list path and no natural key or variant", k.Token)
+			}
+		default:
+			return nil, fmt.Errorf("private.json: %s has shape %q", k.Token, k.Shape)
+		}
+		if k.Variant != nil && (k.Variant.Field == "" || k.Variant.Value == "" || k.Fields[k.Variant.Field] != nil) {
+			return nil, fmt.Errorf("private.json: %s variant %+v is incomplete or still a field", k.Token, *k.Variant)
 		}
 		fillWire(k.Fields)
 	}

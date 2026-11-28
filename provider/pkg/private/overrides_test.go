@@ -19,15 +19,19 @@ func TestKindsYAMLValid(t *testing.T) {
 	for _, e := range o.Expose {
 		exposed = append(exposed, e.Kind+"="+e.Token)
 	}
-	// Slice 1 (design §10): exactly these four kinds.
-	if got := strings.Join(exposed, " "); got != "qos-rules=QosRule apgroups=ApGroup firewall-app-blocks=FirewallAppBlock network-members-group=NetworkMembersGroup" {
+	// Slice 1 (design §10): the four v2 kinds; slice 2 (§S2.7, §S2.8): the
+	// IPv6 ACL rule variant, the classic user group and the ntp settings.
+	if got := strings.Join(exposed, " "); got != "qos-rules=QosRule apgroups=ApGroup firewall-app-blocks=FirewallAppBlock network-members-group=NetworkMembersGroup "+
+		"acl-rules=AclRuleIpv6 UserGroup=UserGroup Setting.ntp=SettingNtp" {
 		t.Errorf("expose = %s", got)
 	}
 	// The live findings of the research report are recorded.
 	itemGet := map[string]bool{}
 	for _, g := range o.ItemGet {
-		if g.ItemGet {
-			t.Errorf("itemGet %s: only measured 405s (false) are recorded", g.Ref)
+		// v2 entries record measured 405s; a classic kind's item GET is
+		// unknown in the model, so a measured answer is recorded too.
+		if g.ItemGet && g.APIName() != kind.APIClassic {
+			t.Errorf("itemGet %s: only measured 405s (false) are recorded for v2 kinds", g.Ref)
 		}
 		itemGet[g.Kind] = true
 	}
@@ -92,6 +96,16 @@ func TestValidateRejects(t *testing.T) {
 		"rule no msg":    {base + "rules:\n  - {kind: a, fields: [f], source: s}\n", "message is empty"},
 		"list path":      {base + "listPath:\n  - {kind: a, path: \"/Bad Path\", source: s}\n", "bad path"},
 		"list path dup":  {base + "listPath:\n  - {kind: a, path: x, source: s}\n  - {kind: a, path: y, source: s}\n", "listed twice"},
+		// The G-Q4 variant exception (private-binding.md §S2.7).
+		"variant no officialVariants": {base + "expose:\n  - {kind: a, token: A, naturalKey: [n], variant: {field: t, value: V6}, source: s}\nofficialTwins:\n  - {kind: a, official: [x], source: s}\n", "lists no officialVariants"},
+		"variant served officially":   {base + "expose:\n  - {kind: a, token: A, naturalKey: [n], variant: {field: t, value: V4}, source: s}\nofficialTwins:\n  - {kind: a, official: [x], officialVariants: {field: t, values: [V4]}, source: s}\n", "is served by the official API"},
+		"variant field differs":       {base + "expose:\n  - {kind: a, token: A, naturalKey: [n], variant: {field: t, value: V6}, source: s}\nofficialTwins:\n  - {kind: a, official: [x], officialVariants: {field: u, values: [V4]}, source: s}\n", "differs from the exposed variant field"},
+		"variant not a twin":          {base + "expose:\n  - {kind: a, token: A, naturalKey: [n], variant: {field: t, value: V6}, source: s}\n", "only for an official twin"},
+		"served from":                 {base + "expose:\n  - {kind: a, token: A, naturalKey: [n], servedFrom: soon, source: s}\n", "is not a version"},
+		"singleton key":               {base + "expose:\n  - {kind: a, token: A, shape: singleton, naturalKey: [n], source: s}\n", "a singleton has no natural key"},
+		"bad shape":                   {base + "expose:\n  - {kind: a, token: A, shape: blob, naturalKey: [n], source: s}\n", "want collection or singleton"},
+		"bad verbs":                   {base + "expose:\n  - {kind: a, token: A, verbs: CRUDX, naturalKey: [n], source: s}\n", "want CRUD"},
+		"create default no value":     {base + "createDefaults:\n  - {kind: a, fields: {f: }, source: s}\n", "has no value"},
 	} {
 		_, err := Parse([]byte(c.doc))
 		if err == nil || !strings.Contains(err.Error(), c.want) {

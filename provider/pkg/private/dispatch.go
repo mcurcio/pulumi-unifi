@@ -74,7 +74,10 @@ func NewDispatcher(fw pulumirpc.ResourceProviderServer, name string, mergedSchem
 		ResourceProviderServer: fw, name: name, schema: mergedSchema, surface: s, client: c,
 	}
 	d.guard = &versionGuard{Binding: c, want: s.Source.NetworkVersion, read: c.NetworkVersion}
-	d.engine = &engine.Engine{Surface: s, Binding: d.guard}
+	d.engine = &engine.Engine{Surface: s, Binding: d.guard,
+		// A settings singleton's release (§S2.8); to the plugin log, like the
+		// ordering's (private-binding.md §S2.14 row 7).
+		Warn: func(msg string) { logging.Warningf("%s", msg) }}
 	d.configureClients(controller.Config{}, "default")
 	d.ordering = &core.Ordering{
 		Binding: official.New(d.ctl),

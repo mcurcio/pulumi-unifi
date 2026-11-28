@@ -21,6 +21,16 @@ func (g *generator) resource(e private.Expose, k *engine.Kind) (pschema.Resource
 	desc := fmt.Sprintf("A `%s` object of the UniFi Network application, managed through its private API.\n\n"+
 		"Import it by its natural key (%s) or by its stored id (`private:<id>`). "+
 		"A managed property removed from the program is reset to its default on the next update.", k.Collection, strings.Join(keys, ", "))
+	switch {
+	case k.IsSingleton():
+		desc = fmt.Sprintf("The `%s` settings of the site in the UniFi Network application, managed through its private API. "+
+			"There is one per site: creating it adopts the live settings and sets the declared properties; destroying it "+
+			"leaves the settings as they are.\n\nImport it by `%s` or by its stored id (`private:<id>`). "+
+			"A managed property removed from the program is reset to its default on the next update.", k.SingletonKey, k.SingletonKey)
+	case k.Variant != nil:
+		desc += fmt.Sprintf("\n\nOnly objects with `%s` = `%s` belong to this resource; the official API serves the other values (%s).",
+			k.Variant.Field, k.Variant.Value, strings.Join(k.OfficialTokens, ", "))
+	}
 	res := pschema.ResourceSpec{
 		ObjectTypeSpec:  pschema.ObjectTypeSpec{Type: "object", Description: desc, Properties: map[string]pschema.PropertySpec{}},
 		InputProperties: map[string]pschema.PropertySpec{},
@@ -32,7 +42,7 @@ func (g *generator) resource(e private.Expose, k *engine.Kind) (pschema.Resource
 			return res, err
 		}
 		res.Properties[f.Property] = ps
-		if f.ReadOnly {
+		if f.ReadOnly || f.OutputOnly {
 			continue
 		}
 		in := ps
@@ -156,7 +166,7 @@ func describe(f *engine.Field) string {
 	} else if f.Nullable {
 		parts = append(parts, "Removing it clears it.")
 	}
-	if f.ReadOnly {
+	if f.ReadOnly || f.OutputOnly {
 		parts = append(parts, "Set by the controller.")
 	}
 	if f.CreateOnly {

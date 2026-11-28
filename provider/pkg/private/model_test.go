@@ -198,12 +198,20 @@ func TestPrivateSliceKinds(t *testing.T) {
 	for _, g := range o.ItemGet {
 		itemGet[g.Kind] = g.ItemGet
 	}
+	notSecret := map[string]bool{}
+	for _, l := range o.NotSecret {
+		for _, f := range l.Fields {
+			notSecret[l.Ref.String()+"."+f] = true
+		}
+	}
 	want := map[string]struct {
 		id      string
 		itemGet bool
 	}{
 		"qos-rules": {"_id", true}, "apgroups": {"_id", false},
 		"firewall-app-blocks": {"_id", false}, "network-members-group": {"id", true},
+		// Slice 2 (private-binding.md §S2.7, §S2.8).
+		"acl-rules": {"_id", false}, "UserGroup": {"_id", true}, "Setting.ntp": {"_id", false},
 	}
 	for _, e := range o.Expose {
 		k := m.Find(e.APIName(), e.Kind)
@@ -211,7 +219,11 @@ func TestPrivateSliceKinds(t *testing.T) {
 			t.Errorf("%s not in the model", e.Ref)
 			continue
 		}
-		w := want[e.Kind]
+		w, ok := want[e.Kind]
+		if !ok {
+			t.Errorf("%s: no expectation recorded in this test", e.Ref)
+			continue
+		}
 		if k.IDField != w.id {
 			t.Errorf("%s idField = %s, want %s", e.Kind, k.IDField, w.id)
 		}
@@ -222,11 +234,20 @@ func TestPrivateSliceKinds(t *testing.T) {
 		if g, ok := itemGet[e.Kind]; ok && !g && k.ItemGet {
 			t.Errorf("%s: measured 405 but the route table has an item GET", e.Kind)
 		}
-		if !strings.Contains(k.Verbs, "C") || !strings.Contains(k.Verbs, "U") || !strings.Contains(k.Verbs, "D") {
-			t.Errorf("%s verbs %s: slice kinds need create, update and delete", e.Kind, k.Verbs)
+		verbs, need := k.Verbs, "CUD"
+		if verbs == "" {
+			verbs = e.Verbs // classic: measured, stated in kinds.yaml
+		}
+		if e.ShapeName() == ShapeSingleton {
+			need = "RU"
+		}
+		for _, v := range need {
+			if !strings.ContainsRune(verbs, v) {
+				t.Errorf("%s verbs %q: a %s needs %s", e.Kind, verbs, e.ShapeName(), need)
+			}
 		}
 		for _, nk := range e.NaturalKey {
-			if f := FieldAt(k, nk); f == nil || f.Secret || f.ReadOnly {
+			if f := FieldAt(k, nk); f == nil || f.Secret && !notSecret[e.Ref.String()+"."+nk] || f.ReadOnly {
 				t.Errorf("%s natural key %s: missing, secret or read-only", e.Kind, nk)
 			}
 		}

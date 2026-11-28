@@ -1,7 +1,10 @@
 // Package binding is the HTTP binding of the private API
-// (docs/design/private-binding.md §2, §7, §S2.6): v2 paths under
-// <network root>/v2/api/site/{name}/, and already the classic
-// {"meta":…,"data":[…]} envelope. The network root is the authenticated edge
+// (docs/design/private-binding.md §2, §7, §S2.6, §S2.8): v2 paths under
+// <network root>/v2/api/site/{name}/ and classic paths under
+// <network root>/api/s/{name}/ with their {"meta":…,"data":[…]} envelope and
+// wire semantics (create answers 200 with data:[obj]; a GET answering data:[]
+// is gone; an rc:"error" body is a ClassicError; a DELETE answering
+// api.err.IdInvalid is gone only once a list confirms it). The network root is the authenticated edge
 // (https://<apiHost>/proxy/network, the same apiKey as the official API) or the
 // networkBaseUrl override (the Network app directly, before the wizard). The
 // wire itself (TLS policy, X-API-Key, 429 retry) is the controller layer's; this
@@ -13,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -96,6 +100,59 @@ func (e *HTTPError) Error() string {
 	return msg
 }
 
+// ClassicError is a classic API refusal: an {"meta":{"rc":"error","msg":…}}
+// body, with the first validationError {field, pattern} when there is one.
+type ClassicError struct {
+	Method, URL string
+	Status      int
+	Msg         string // api.err.InvalidPayload, api.err.IdInvalid, …
+	Detail      string // the item's own msg (api.err.InvalidValue)
+	Field       string
+	Pattern     string
+}
+
+func (e *ClassicError) Error() string {
+	msg := fmt.Sprintf("%s %s: HTTP %d: the controller refused it: %s", e.Method, e.URL, e.Status, e.Msg)
+	if e.Detail != "" && e.Detail != e.Msg {
+		msg += " (" + e.Detail + ")"
+	}
+	if e.Field != "" {
+		msg += fmt.Sprintf(": field %s must match %s", e.Field, e.Pattern)
+	}
+	return msg
+}
+
+// classicError parses a classic error body; nil when it is not one.
+func classicError(method, u string, status int, raw []byte) *ClassicError {
+	var doc struct {
+		Meta struct {
+			RC  string `json:"rc"`
+			Msg string `json:"msg"`
+		} `json:"meta"`
+		Data []struct {
+			Msg             string `json:"msg"`
+			ValidationError struct {
+				Field   string `json:"field"`
+				Pattern string `json:"pattern"`
+			} `json:"validationError"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &doc) != nil || doc.Meta.RC != "error" {
+		return nil
+	}
+	e := &ClassicError{Method: method, URL: u, Status: status, Msg: doc.Meta.Msg}
+	for _, d := range doc.Data {
+		if d.ValidationError.Field != "" {
+			e.Detail, e.Field, e.Pattern = d.Msg, d.ValidationError.Field, d.ValidationError.Pattern
+			break
+		}
+		if e.Detail == "" {
+			e.Detail = d.Msg
+		}
+	}
+	return e
+}
+
 // errBody is the server's answer shortened for an error: an HTML page (the
 // edge's error and login pages) is reduced to its status text.
 func errBody(status int, raw []byte) string {
@@ -118,6 +175,9 @@ func (c *Client) do(ctx context.Context, method, u string, body any) (any, int, 
 		return nil, code, err
 	}
 	if code < 200 || code > 299 {
+		if ce := classicError(method, u, code, raw); ce != nil {
+			return nil, code, ce
+		}
 		return nil, code, &HTTPError{Method: method, URL: u, Status: code, Body: errBody(code, raw)}
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
@@ -145,7 +205,7 @@ func unwrap(k *engine.Kind, v any) (any, error) {
 	if meta, ok := m["meta"].(map[string]any); ok {
 		if rc, _ := meta["rc"].(string); rc != "" && rc != "ok" {
 			msg, _ := meta["msg"].(string)
-			return nil, fmt.Errorf("controller answered rc=%s: %s", rc, msg)
+			return nil, &ClassicError{Status: http.StatusOK, Msg: msg}
 		}
 	}
 	return m["data"], nil
@@ -240,6 +300,10 @@ func (c *Client) Update(ctx context.Context, k *engine.Kind, id string, body map
 	return unwrap(k, v)
 }
 
+// idInvalid is the classic answer to a DELETE of an id it does not hold, and
+// equally of a malformed id (probe f1).
+const idInvalid = "api.err.IdInvalid"
+
 // Delete implements engine.Binding.
 func (c *Client) Delete(ctx context.Context, k *engine.Kind, id string) (bool, error) {
 	u, err := c.url(ctx, k, k.ItemPath, id)
@@ -248,6 +312,20 @@ func (c *Client) Delete(ctx context.Context, k *engine.Kind, id string) (bool, e
 	}
 	_, code, err := c.do(ctx, http.MethodDelete, u, nil)
 	if code == http.StatusNotFound {
+		return false, nil
+	}
+	var ce *ClassicError
+	if errors.As(err, &ce) && ce.Msg == idInvalid && k.ListGet {
+		// Gone, or a malformed id: only a list that lacks the id says gone.
+		all, lerr := c.List(ctx, k)
+		if lerr != nil {
+			return false, fmt.Errorf("%w (and the list to confirm it is gone failed: %v)", err, lerr)
+		}
+		for _, o := range all {
+			if fmt.Sprint(o[k.IDField]) == id {
+				return false, err
+			}
+		}
 		return false, nil
 	}
 	return err == nil, err

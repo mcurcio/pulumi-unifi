@@ -12,7 +12,15 @@
 #     `api:` defaults to v2;
 #   - an entry that names a kind or field the model lacks is a LOUD error, so a
 #     version bump that renames something cannot pass silently;
-#   - an exposed kind may not be an official twin (whole-kind serving, G-Q4).
+#   - an exposed kind may not be an official twin (whole-kind serving, G-Q4),
+#     except one variant the official API does not serve: `variant:` on the
+#     expose entry plus `officialVariants:` on the twin (the G-Q4 variant
+#     exception, docs/design/private-binding.md §S2.7). Such a kind is
+#     generated only when the pin's Network version is at least `servedFrom:`;
+#     without it, it is built and checked but NOT SERVED;
+#   - a classic kind states its measured verbs (`verbs:`), which the model
+#     leaves unknown; `shape: singleton` is one document per site (create
+#     adopts, delete releases, §S2.8).
 #
 # Field paths are dotted wire names; list items add "[]" ("monitors[].name").
 version: 1
@@ -36,6 +44,27 @@ expose:
     token: NetworkMembersGroup
     naturalKey: [name]
     source: "slice 1 (design §10): minimal create round-tripped live on 10.4.57; its id field is `id`, not `_id`"
+  - kind: acl-rules
+    token: AclRuleIpv6
+    naturalKey: [name]
+    variant: {field: type, value: IPV6}
+    # servedFrom: unset. Network 10.4.57 refuses IPv6 ACL rules (create or a PUT to
+    # IPV6 answers 500 "IPv6 ACL is not supported yet"), so the kind is built and
+    # Tier-1 tested but not served. Set it to the first Network version measured
+    # to accept them; that needs the owner-approved pin bump (design §S2.7).
+    source: "owner decision 3 (2026-11-28): IPv6 ACL rules as the G-Q4 variant exception; slice 2 probe c1 (docs/research/private-api-model-source.md): refused on 10.4.57"
+  - kind: UserGroup
+    api: classic
+    token: UserGroup
+    naturalKey: [name]
+    verbs: CRUD
+    source: "slice 2 probe f1 + slice 2 step 3 probe (live 10.4.57, seeded edge, key): POST rest/usergroup 200 data:[obj], GET item 200 (data:[] when gone), PUT 200, DELETE 200"
+  - kind: Setting.ntp
+    api: classic
+    token: SettingNtp
+    shape: singleton
+    verbs: "-RU-"
+    source: "slice 2 probe f2 + slice 2 step 3 probe (live 10.4.57, seeded edge, key): GET rest/setting/ntp answers the one document, PUT rest/setting/ntp/{_id} merges (200), a bad enum 400; no secrets in the section"
 
 # Kinds an official (Integration API) resource already serves. Never exposed
 # privately (whole kinds, frame G-Q4). `official:` lists the golden tokens
@@ -46,6 +75,7 @@ officialTwins:
     source: "official spec 10.4.57 serves DNS records (/v1/sites/{siteId}/dns/policies); design §5, §10"
   - kind: acl-rules
     official: ["resource:unifi:sites/v1:AclRuleIpv4", "resource:unifi:sites/v1:AclRuleMac"]
+    officialVariants: {field: type, values: [IPV4, MAC]}
     source: "official spec 10.4.57 serves ACL rules with full CRUD (/v1/sites/{siteId}/acl-rules); the provider names the IPV4/MAC variants AclRule* (provider/pkg/gen/mappings.yaml entityPrefixes; TrafficMatch* until slice 2, kept as aliases); design §5, §10, §S2.3"
   - kind: firewall-policies
     official: ["resource:unifi:sites/v1:FirewallPolicy"]
@@ -82,12 +112,25 @@ itemGet:
     itemGet: false
     source: "live 10.4.57 (pre-wizard, :8081): GET static-dns/{id} -> 405; route table has no item GET"
 
+  - kind: UserGroup
+    api: classic
+    itemGet: true
+    source: "live 10.4.57 (seeded edge, key): GET rest/usergroup/{id} 200 with data:[obj], data:[] for an absent id"
+
 # The collection GET lives at another path than the create path. Without an
 # entry the list path is the collection itself.
 listPath:
   - kind: network-members-group
     path: network-members-groups
     source: "route table 10.4.57: GET /api/site/{siteName}/network-members-groups (plural); the singular collection answers only POST"
+  - kind: UserGroup
+    api: classic
+    path: rest/usergroup
+    source: "live 10.4.57 (seeded edge, key): GET rest/usergroup 200 {meta,data:[...]}; the model leaves classic list GETs unknown"
+  - kind: Setting.ntp
+    api: classic
+    path: rest/setting/ntp
+    source: "live 10.4.57 (seeded edge, key): GET rest/setting/ntp 200 {meta,data:[the one ntp document]} (get/setting/ntp answers the same)"
 
 # Required in practice but not annotated: a create without them fails with a
 # 500 NullPointerException naming nothing else.
@@ -102,15 +145,71 @@ implicitRequired:
     fields: [source_filter]
     source: "live 10.4.57 minimal create: 500 NullPointerException without source_filter"
 
+# Sent on create only when the program does not set them, never managed
+# afterwards. Each field must also be outputOnly.
+createDefaults:
+  - kind: acl-rules
+    fields: {acl_index: 0}
+    source: "slice 2 probe c1: a v2 create without acl_index answers 400 (required); its position is owned by unifi:sites/v1:AclRuleOrdering (design §S2.5, §S2.7)"
+
+# Owned by the server: outputs only, kept at the live value in a PUT body.
+outputOnly:
+  - kind: acl-rules
+    fields: [acl_index, external_id]
+    source: "slice 2 probe a5/d2: acl_index is renumbered by the official ordering PUT; probe e: external_id is the server-minted official rule id (design §S2.7)"
+
 # Cross-field checks run in Check. None in slice 1.
 rules: []
 
 # Values a dropped managed field resets to where the model states none (G-Q1).
 # Added as the e2e measures them, each with source: "live create 10.4.57".
-defaults: []
+defaults:
+  - kind: UserGroup
+    api: classic
+    field: qos_rate_max_down
+    value: -1
+    source: "live 10.4.57 (seeded edge): the built-in Default group holds -1 (no limit); the field's pattern allows -1"
+  - kind: UserGroup
+    api: classic
+    field: qos_rate_max_up
+    value: -1
+    source: "live 10.4.57 (seeded edge): the built-in Default group holds -1 (no limit); the field's pattern allows -1"
+  - kind: Setting.ntp
+    api: classic
+    field: setting_preference
+    value: auto
+    source: "live 10.4.57: the seeded (wizard-completed, unchanged) controller's ntp document"
+  - kind: Setting.ntp
+    api: classic
+    field: ntp_server_1
+    value: 0.ubnt.pool.ntp.org
+    source: "live 10.4.57 (slice 2 step 3 edge e2e): a PUT with setting_preference=auto makes the controller put this value back, whatever the body says"
+  - kind: Setting.ntp
+    api: classic
+    field: ntp_server_2
+    value: 1.ubnt.pool.ntp.org
+    source: "live 10.4.57 (slice 2 step 3 edge e2e): a PUT with setting_preference=auto makes the controller put this value back, whatever the body says"
+  - kind: Setting.ntp
+    api: classic
+    field: ntp_server_3
+    value: 2.ubnt.pool.ntp.org
+    source: "live 10.4.57 (slice 2 step 3 edge e2e): a PUT with setting_preference=auto makes the controller put this value back, whatever the body says"
+  - kind: Setting.ntp
+    api: classic
+    field: ntp_server_4
+    value: 3.ubnt.pool.ntp.org
+    source: "live 10.4.57 (slice 2 step 3 edge e2e): a PUT with setting_preference=auto makes the controller put this value back, whatever the body says"
 
 # Field facts, filled from e2e findings.
 createOnly: []
 notReturned: []
-notSecret: []
-rename: []
+notSecret:
+  - kind: UserGroup
+    api: classic
+    fields: [name]
+    source: "the support-dump redaction list marks usergroup.name; it is the group's display name and natural key (live 10.4.57: GET returns it in plain text)"
+rename:
+  - kind: acl-rules
+    field: external_id
+    property: aclRuleId
+    source: "probe e: the private external_id is the official rule id, which unifi:sites/v1:AclRuleOrdering takes (design §S2.7)"

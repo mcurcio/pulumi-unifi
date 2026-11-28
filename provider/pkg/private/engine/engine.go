@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -46,6 +47,15 @@ var ErrNotFound = errors.New("not found")
 type Engine struct {
 	Surface *Surface
 	Binding Binding
+	// Warn reports something the user should see (a singleton's release on
+	// Delete); nil drops it.
+	Warn func(msg string)
+}
+
+func (e *Engine) warn(f string, a ...any) {
+	if e.Warn != nil {
+		e.Warn(fmt.Sprintf(f, a...))
+	}
 }
 
 // Failure is one Check failure.
@@ -84,7 +94,7 @@ func (e *Engine) Check(k *Kind, olds, news resource.PropertyMap) []Failure {
 	// G-Q1: dropped managed paths need a default.
 	for _, p := range Dropped(k, ow, nw) {
 		f := FieldAt(k, p)
-		if f == nil || f.ReadOnly {
+		if f == nil || f.ReadOnly || f.OutputOnly {
 			continue
 		}
 		if !f.HasDefault() {
@@ -107,7 +117,7 @@ func checkObject(fs map[string]*Field, nw, ow map[string]any, at Path, add func(
 		p := append(append(Path{}, at...), w)
 		v, has := nw[w]
 		if !has || v == nil {
-			if f.Required && !f.ReadOnly {
+			if f.Required && !f.ReadOnly && !f.OutputOnly {
 				add(pathProps(fs, p, at), "%s is required", f.Property)
 			}
 			continue
@@ -371,6 +381,41 @@ func (e *Engine) Create(ctx context.Context, k *Kind, inputs resource.PropertyMa
 	if hasUnknown(body) {
 		return "", nil, errors.New("create: inputs hold unknown values")
 	}
+	if k.IsSingleton() {
+		return e.adopt(ctx, k, body)
+	}
+	declared := DeepCopy(body).(map[string]any)
+	// Rule 3: a natural key names one object. The controller does not
+	// enforce it everywhere (classic accepts duplicate names, probe f1), so a
+	// create never makes a second object with the same key.
+	if k.ListGet && len(k.NaturalKey) > 0 {
+		hits, err := e.matchKey(ctx, k, body)
+		if err != nil {
+			return "", nil, err
+		}
+		if len(hits) > 0 {
+			var ids []string
+			for _, h := range hits {
+				ids = append(ids, IDPrefix+idOf(k, h))
+			}
+			sort.Strings(ids)
+			return "", nil, fmt.Errorf("a %s with %s already exists (id %s); import it instead of creating a second one",
+				k.Token, describeKey(k, keyValues(k, body)), strings.Join(ids, ", "))
+		}
+	}
+	for _, w := range sortedKeys(k.CreateDefaults) {
+		if _, set := body[w]; set {
+			continue
+		}
+		var v any
+		if err := jsonUnmarshal(k.CreateDefaults[w], &v); err != nil {
+			return "", nil, fmt.Errorf("create default %s: %w", w, err)
+		}
+		body[w] = v
+	}
+	if k.Variant != nil {
+		body[k.Variant.Field] = k.Variant.Value
+	}
 	var send any = body
 	if k.CreateList {
 		send = []any{body}
@@ -394,7 +439,69 @@ func (e *Engine) Create(ctx context.Context, k *Kind, inputs resource.PropertyMa
 			obj = live
 		}
 	}
+	return IDPrefix + id, e.outputs(k, obj, declared), nil
+}
+
+// adopt is a singleton's Create: nothing can be created, so it reads the one
+// live document, merges the managed fields onto it and PUTs it (§S2.8).
+func (e *Engine) adopt(ctx context.Context, k *Kind, body map[string]any) (string, resource.PropertyMap, error) {
+	live, err := e.single(ctx, k)
+	if err != nil {
+		return "", nil, err
+	}
+	id := idOf(k, live)
+	merged, err := MergeBody(k, live, map[string]any{}, body)
+	if err != nil {
+		return "", nil, err
+	}
+	resp, err := e.Binding.Update(ctx, k, id, merged)
+	if err != nil {
+		return "", nil, err
+	}
+	obj := firstObject(resp)
+	if idOf(k, obj) != id {
+		if obj, err = e.single(ctx, k); err != nil {
+			obj = merged
+		}
+	}
 	return IDPrefix + id, e.outputs(k, obj, body), nil
+}
+
+// single reads a singleton's one document.
+func (e *Engine) single(ctx context.Context, k *Kind) (map[string]any, error) {
+	all, err := e.Binding.List(ctx, k)
+	if err != nil {
+		return nil, err
+	}
+	if len(all) != 1 || idOf(k, all[0]) == "" {
+		return nil, fmt.Errorf("%s: the controller holds %d documents for this site, want exactly one", k.Token, len(all))
+	}
+	return all[0], nil
+}
+
+// checkVariant is the G-Q4 variant exception's read check: a live object
+// whose discriminator is not the pinned value is served by another token. It
+// is a loud error, never "gone", so Pulumi does not create a duplicate rule.
+func (e *Engine) checkVariant(k *Kind, obj map[string]any) error {
+	if k.Variant == nil || obj == nil {
+		return nil
+	}
+	got := keyString(obj[k.Variant.Field])
+	if got == k.Variant.Value {
+		return nil
+	}
+	served := "an official resource"
+	if len(k.OfficialTokens) > 0 {
+		served = strings.Join(k.OfficialTokens, " or ")
+	}
+	return fmt.Errorf("%s %s%s now has %s=%s (changed outside Pulumi); it is served by %s now, not by %s: "+
+		"remove it from this stack (pulumi state delete) and import it there",
+		k.Token, IDPrefix, idOf(k, obj), k.Variant.Field, got, served, k.Token)
+}
+
+// inVariant says whether a listed object belongs to the kind.
+func inVariant(k *Kind, obj map[string]any) bool {
+	return k.Variant == nil || keyString(obj[k.Variant.Field]) == k.Variant.Value
 }
 
 func firstObject(v any) map[string]any {
@@ -468,7 +575,15 @@ type ReadResult struct {
 // import's `properties`). A gone object returns (nil, nil).
 func (e *Engine) Read(ctx context.Context, k *Kind, id string, oldInputs resource.PropertyMap, importing bool) (*ReadResult, error) {
 	var live map[string]any
-	if importing && !strings.HasPrefix(id, IDPrefix) {
+	if importing && k.IsSingleton() && !strings.HasPrefix(id, IDPrefix) {
+		if id != k.SingletonKey {
+			return nil, fmt.Errorf("import id %q: %s is one document per site; import it by %q or %s<id>", id, k.Token, k.SingletonKey, IDPrefix)
+		}
+		var err error
+		if live, err = e.single(ctx, k); err != nil {
+			return nil, err
+		}
+	} else if importing && !strings.HasPrefix(id, IDPrefix) {
 		for _, pre := range otherPrefixes {
 			if strings.HasPrefix(id, pre) {
 				return nil, fmt.Errorf("import id %q names another API; %s is served by the private API (use %s<id> or its natural key %s)",
@@ -496,6 +611,9 @@ func (e *Engine) Read(ctx context.Context, k *Kind, id string, oldInputs resourc
 			return nil, err
 		}
 	}
+	if err := e.checkVariant(k, live); err != nil {
+		return nil, err
+	}
 	res := &ReadResult{ID: IDPrefix + idOf(k, live)}
 	if importing || oldInputs == nil {
 		// The adopted managed paths are the natural key plus the required
@@ -509,7 +627,7 @@ func (e *Engine) Read(ctx context.Context, k *Kind, id string, oldInputs resourc
 			nk[w] = true
 		}
 		res.Inputs = FromWire(k, live, func(p Path, f *Field) bool {
-			return !f.ReadOnly && !f.Secret && (f.Required || len(p) == 1 && nk[p[0]])
+			return !f.ReadOnly && !f.OutputOnly && !f.Secret && (f.Required || len(p) == 1 && nk[p[0]])
 		})
 		res.Outputs = e.outputs(k, live, nil)
 		return res, nil
@@ -621,29 +739,11 @@ func keyHint(k *Kind) string {
 // lookupByKey lists the collection and returns the one object whose natural
 // key matches; zero or several matches is an error naming the candidates.
 func (e *Engine) lookupByKey(ctx context.Context, k *Kind, src map[string]any) (map[string]any, error) {
-	all, err := e.Binding.List(ctx, k)
+	hits, cands, err := e.byKey(ctx, k, src)
 	if err != nil {
 		return nil, err
 	}
-	var want []string
-	for _, w := range k.NaturalKey {
-		v, _ := Get(src, strings.Split(w, "."))
-		want = append(want, keyString(v))
-	}
-	var hits []map[string]any
-	var cands []string
-	for _, o := range all {
-		var got []string
-		for _, w := range k.NaturalKey {
-			v, _ := Get(o, strings.Split(w, "."))
-			got = append(got, keyString(v))
-		}
-		cands = append(cands, strings.Join(got, ";"))
-		if strings.Join(got, "\x00") == strings.Join(want, "\x00") {
-			hits = append(hits, o)
-		}
-	}
-	desc := describeKey(k, want)
+	desc := describeKey(k, keyValues(k, src))
 	switch len(hits) {
 	case 1:
 		return hits[0], nil
@@ -658,6 +758,41 @@ func (e *Engine) lookupByKey(ctx context.Context, k *Kind, src map[string]any) (
 		sort.Strings(ids)
 		return nil, fmt.Errorf("%d %s objects have %s: %s; import one by its id", len(hits), k.Token, desc, strings.Join(ids, ", "))
 	}
+}
+
+// matchKey returns the listed objects (of the kind's variant) whose natural
+// key equals src's.
+func (e *Engine) matchKey(ctx context.Context, k *Kind, src map[string]any) ([]map[string]any, error) {
+	hits, _, err := e.byKey(ctx, k, src)
+	return hits, err
+}
+
+func (e *Engine) byKey(ctx context.Context, k *Kind, src map[string]any) (hits []map[string]any, cands []string, err error) {
+	all, err := e.Binding.List(ctx, k)
+	if err != nil {
+		return nil, nil, err
+	}
+	want := strings.Join(keyValues(k, src), "\x00")
+	for _, o := range all {
+		if !inVariant(k, o) {
+			continue
+		}
+		got := keyValues(k, o)
+		cands = append(cands, strings.Join(got, ";"))
+		if strings.Join(got, "\x00") == want {
+			hits = append(hits, o)
+		}
+	}
+	return hits, cands, nil
+}
+
+func keyValues(k *Kind, obj map[string]any) []string {
+	var out []string
+	for _, w := range k.NaturalKey {
+		v, _ := Get(obj, strings.Split(w, "."))
+		out = append(out, keyString(v))
+	}
+	return out
 }
 
 func describeKey(k *Kind, vals []string) string {
@@ -714,9 +849,15 @@ func (e *Engine) Update(ctx context.Context, k *Kind, id string, oldInputs, newI
 		}
 		return nil, err
 	}
+	if err := e.checkVariant(k, live); err != nil {
+		return nil, err
+	}
 	body, err := MergeBody(k, live, ow, nw)
 	if err != nil {
 		return nil, err
+	}
+	if k.Variant != nil {
+		body[k.Variant.Field] = k.Variant.Value
 	}
 	resp, err := e.Binding.Update(ctx, k, raw, body)
 	if err != nil {
@@ -744,7 +885,7 @@ func MergeBody(k *Kind, live, olds, news map[string]any) (map[string]any, error)
 	}
 	for _, p := range Dropped(k, olds, news) {
 		f := FieldAt(k, p)
-		if f == nil || f.ReadOnly {
+		if f == nil || f.ReadOnly || f.OutputOnly {
 			continue
 		}
 		if !f.HasDefault() {
@@ -782,11 +923,36 @@ func stripReadOnly(fs map[string]*Field, obj map[string]any) {
 // ---------------------------------------------------------------- Delete
 
 // Delete deletes the object; one already gone counts as deleted.
+// A singleton is released: no call, the live document stays as it is, and a
+// warning says so (§S2.8). A variant kind is checked first, so a rule whose
+// discriminator changed outside Pulumi is never deleted through this token.
 func (e *Engine) Delete(ctx context.Context, k *Kind, id string) error {
 	raw, err := ParseID(id)
 	if err != nil {
 		return err
 	}
+	if k.IsSingleton() {
+		e.warn("%s %s released: removed from the stack, the controller keeps its current values", k.Token, id)
+		return nil
+	}
+	if k.Variant != nil {
+		live, err := e.fetch(ctx, k, raw)
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := e.checkVariant(k, live); err != nil {
+			return err
+		}
+	}
 	_, err = e.Binding.Delete(ctx, k, raw)
 	return err
+}
+
+func jsonUnmarshal(b []byte, v any) error {
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.UseNumber()
+	return dec.Decode(v)
 }

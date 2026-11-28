@@ -114,6 +114,12 @@ func TestPrivateSurfaceGolden(t *testing.T) {
 	if err := Lint(golden(t), out.Schema, out.Surface); err != nil {
 		t.Fatal(err)
 	}
+	// The IPv6 ACL rule variant is built and checked against the model but not
+	// served on this pin: Network 10.4.57 refuses IPv6 ACL rules (slice 2
+	// probe c1; private-binding.md §S2.7).
+	if strings.Join(out.NotServed, "|") != "unifi:network:AclRuleIpv6: NOT SERVED (servedFrom unset)" {
+		t.Errorf("not served: %v", out.NotServed)
+	}
 	tokens := strings.Join(out.Tokens, "\n") + "\n"
 	tp := filepath.Join(testdata, "tokens.txt")
 	if os.Getenv("UPDATE_GOLDEN") == "1" {

@@ -68,6 +68,9 @@ func privateGen(args []string) error {
 		fmt.Fprintln(os.Stderr, "private: no model (PRIVATE=0): schema.merged.json = schema.json, no private kinds")
 	} else {
 		fmt.Fprintf(os.Stderr, "private: Network %s: %d private resources %v\n", m.Source.NetworkVersion, len(out.Tokens), out.Tokens)
+		for _, n := range out.NotServed {
+			fmt.Fprintln(os.Stderr, "private: "+n)
+		}
 	}
 	return nil
 }

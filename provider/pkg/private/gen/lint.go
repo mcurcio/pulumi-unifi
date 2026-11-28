@@ -119,6 +119,9 @@ func lintFields(tok string, fs map[string]*engine.Field, props map[string]pschem
 		if reserved[f.Property] || !reProp.MatchString(f.Property) {
 			add("%s.%s: property name is reserved or not lowerCamel", tok, f.Property)
 		}
+		if strings.HasPrefix(f.Wire, "x_") && !f.Secret {
+			add("%s.%s: an x_ field (the controller's secret convention) is not secret", tok, f.Property)
+		}
 		if reSecretName.MatchString(f.Wire) && !f.Secret {
 			add("%s.%s: the name looks secret but the field is not (record it in kinds.yaml notSecret: to clear it)", tok, f.Property)
 		}

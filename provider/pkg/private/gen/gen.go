@@ -1,5 +1,5 @@
 // Package gen generates the private surface (docs/design/private-binding.md
-// §5): the extracted model + kinds.yaml + the official golden schema →
+// §5, §S2.7, §S2.8): the extracted model + kinds.yaml + the official golden schema →
 // schema.merged.json (the golden plus the private resources, types and the
 // networkBaseUrl config key) and private.json (the engine's kind table).
 //
@@ -44,6 +44,9 @@ type Output struct {
 	Surface []byte // private.json
 	// Tokens lists the private tokens ("resource:unifi:network:QosRule").
 	Tokens []string
+	// NotServed lists the exposed kinds that were built and checked but not
+	// served, each with why ("unifi:network:X: NOT SERVED (servedFrom unset)").
+	NotServed []string
 }
 
 // EmptySurface is private.json without a model: no private kinds, only the
@@ -81,6 +84,9 @@ func Generate(m *kind.Model, o *private.Overrides, golden []byte) (*Output, erro
 	if err := o.Resolve(m); err != nil {
 		return nil, err
 	}
+	if err := CheckTwinVariants(o, golden); err != nil {
+		return nil, err
+	}
 	var spec pschema.PackageSpec
 	if err := json.Unmarshal(golden, &spec); err != nil {
 		return nil, fmt.Errorf("parsing the golden schema: %w", err)
@@ -90,8 +96,19 @@ func Generate(m *kind.Model, o *private.Overrides, golden []byte) (*Output, erro
 		Singletons: singletons()}
 	exp := append([]private.Expose(nil), o.Expose...)
 	sort.Slice(exp, func(i, j int) bool { return exp[i].Token < exp[j].Token })
-	var errs []string
+	var errs, notServed []string
 	for _, e := range exp {
+		if why := notServedReason(e, m.Source.NetworkVersion); why != "" {
+			// Built and checked against a scratch schema, then left out.
+			scratch := &generator{m: m, o: o, spec: &pschema.PackageSpec{Resources: map[string]pschema.ResourceSpec{}},
+				types: map[string]pschema.ComplexTypeSpec{}}
+			if _, err := scratch.kind(e); err != nil {
+				errs = append(errs, err.Error())
+				continue
+			}
+			notServed = append(notServed, engine.TokenPrefix+e.Token+": NOT SERVED ("+why+")")
+			continue
+		}
 		k, err := g.kind(e)
 		if err != nil {
 			errs = append(errs, err.Error())
@@ -120,12 +137,115 @@ func Generate(m *kind.Model, o *private.Overrides, golden []byte) (*Output, erro
 	if err != nil {
 		return nil, err
 	}
-	out := &Output{Schema: sb, Surface: pb}
+	out := &Output{Schema: sb, Surface: pb, NotServed: notServed}
 	for _, k := range surf.Kinds {
 		out.Tokens = append(out.Tokens, "resource:"+k.Token)
 	}
 	sort.Strings(out.Tokens)
 	return out, nil
+}
+
+// notServedReason says why an exposed kind is not served on this Network
+// version; "" when it is served. Only a variant-exception kind carries
+// servedFrom, and without it it is not served.
+func notServedReason(e private.Expose, network string) string {
+	if e.Variant == nil && e.ServedFrom == "" {
+		return ""
+	}
+	if e.ServedFrom == "" {
+		return "servedFrom unset"
+	}
+	if compareVersions(network, e.ServedFrom) < 0 {
+		return fmt.Sprintf("Network %s is older than servedFrom %s", network, e.ServedFrom)
+	}
+	return ""
+}
+
+// compareVersions compares dotted numeric versions ("10.4.57"); a non-numeric
+// suffix of a part is ignored.
+func compareVersions(a, b string) int {
+	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(pa) || i < len(pb); i++ {
+		var x, y int
+		if i < len(pa) {
+			x = leadingInt(pa[i])
+		}
+		if i < len(pb) {
+			y = leadingInt(pb[i])
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+func leadingInt(s string) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+// CheckTwinVariants checks each official twin's officialVariants against the
+// golden: the discriminator consts of its official tokens must be exactly the
+// listed values. So a new official variant (an official IPV6 ACL rule) fails
+// generation, and the variant exception moves to the official API
+// (private-binding.md §S2.7, rule 3 of the exception).
+func CheckTwinVariants(o *private.Overrides, golden []byte) error {
+	var spec pschema.PackageSpec
+	if err := json.Unmarshal(golden, &spec); err != nil {
+		return fmt.Errorf("parsing the golden schema: %w", err)
+	}
+	var errs []string
+	for _, t := range o.OfficialTwins {
+		if t.OfficialVariants == nil {
+			continue
+		}
+		prop := lowerCamel(t.OfficialVariants.Field)
+		got := map[string]bool{}
+		for _, tok := range t.Official {
+			name := strings.TrimPrefix(tok, "resource:")
+			r, ok := spec.Resources[name]
+			if !ok {
+				errs = append(errs, fmt.Sprintf("officialTwins %s: %s is not a golden resource", t.Ref, tok))
+				continue
+			}
+			c, _ := r.InputProperties[prop].Const.(string)
+			if c == "" {
+				errs = append(errs, fmt.Sprintf("officialTwins %s: %s has no %s discriminator const", t.Ref, tok, prop))
+				continue
+			}
+			got[c] = true
+		}
+		want := map[string]bool{}
+		for _, v := range t.OfficialVariants.Values {
+			want[v] = true
+		}
+		for c := range got {
+			if !want[c] {
+				errs = append(errs, fmt.Sprintf("officialTwins %s: the official API now serves %s=%s, which officialVariants does not list; "+
+					"a private variant of that value must move to the official token (G-Q4 variant exception)", t.Ref, t.OfficialVariants.Field, c))
+			}
+		}
+		for v := range want {
+			if !got[v] {
+				errs = append(errs, fmt.Sprintf("officialTwins %s: officialVariants lists %s=%s, but no official token serves it", t.Ref, t.OfficialVariants.Field, v))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		sort.Strings(errs)
+		return errors.New("private gen:\n  " + strings.Join(errs, "\n  "))
+	}
+	return nil
 }
 
 func addConfig(spec *pschema.PackageSpec) {
@@ -153,16 +273,16 @@ type generator struct {
 }
 
 type facts struct {
-	createOnly, notReturned, notSecret, implicitRequired map[string]bool
-	defaults                                             map[string]json.RawMessage
-	rename                                               map[string]string
+	createOnly, notReturned, notSecret, implicitRequired, outputOnly map[string]bool
+	defaults                                                         map[string]json.RawMessage
+	rename                                                           map[string]string
 }
 
 func (g *generator) facts(r private.Ref) (*facts, error) {
 	f := &facts{createOnly: map[string]bool{}, notReturned: map[string]bool{}, notSecret: map[string]bool{},
-		implicitRequired: map[string]bool{}, defaults: map[string]json.RawMessage{}, rename: map[string]string{}}
+		implicitRequired: map[string]bool{}, outputOnly: map[string]bool{}, defaults: map[string]json.RawMessage{}, rename: map[string]string{}}
 	for dst, ls := range map[*map[string]bool][]private.FieldList{&f.createOnly: g.o.CreateOnly, &f.notReturned: g.o.NotReturned,
-		&f.notSecret: g.o.NotSecret, &f.implicitRequired: g.o.ImplicitRequired} {
+		&f.notSecret: g.o.NotSecret, &f.implicitRequired: g.o.ImplicitRequired, &f.outputOnly: g.o.OutputOnly} {
 		for _, l := range ls {
 			if l.Ref.String() == r.String() {
 				for _, p := range l.Fields {
@@ -216,20 +336,37 @@ func (g *generator) kind(e private.Expose) (*engine.Kind, error) {
 	if mk == nil {
 		return nil, fmt.Errorf("%s: not in the model", e.Ref)
 	}
-	if mk.API != kind.APIV2 {
-		return nil, fmt.Errorf("%s: only v2 kinds are served in slice 1", e.Ref)
-	}
 	if mk.Polymorph != nil && !e.AllowPolymorph {
 		return nil, fmt.Errorf("%s: polymorphic body (opt in with allowPolymorph)", e.Ref)
 	}
-	for _, v := range "CUD" {
-		if !strings.ContainsRune(mk.Verbs, v) {
-			return nil, fmt.Errorf("%s: verbs %q lack %c; a resource needs create, update and delete", e.Ref, mk.Verbs, v)
+	verbs := mk.Verbs
+	switch {
+	case verbs == "" && e.Verbs == "":
+		return nil, fmt.Errorf("%s: the model does not know its verbs (classic); state the measured ones with verbs:", e.Ref)
+	case verbs == "":
+		verbs = e.Verbs
+	case e.Verbs != "" && e.Verbs != verbs:
+		return nil, fmt.Errorf("%s: verbs: %s contradicts the model's %s", e.Ref, e.Verbs, verbs)
+	}
+	need := "CUD" // a collection resource creates, updates and deletes
+	if e.ShapeName() == private.ShapeSingleton {
+		need = "RU" // a singleton is read and updated; create adopts, delete releases
+	}
+	for _, v := range need {
+		if !strings.ContainsRune(verbs, v) {
+			return nil, fmt.Errorf("%s: verbs %q lack %c; a %s resource needs %s", e.Ref, verbs, v, e.ShapeName(), need)
 		}
 	}
+	var twinTokens []string
 	for _, t := range g.o.OfficialTwins {
-		if t.Ref.String() == e.Ref.String() {
+		if t.Ref.String() != e.Ref.String() {
+			continue
+		}
+		if e.Variant == nil {
 			return nil, fmt.Errorf("%s: an official resource serves it (%s); whole kinds (G-Q4)", e.Ref, strings.Join(t.Official, ", "))
+		}
+		for _, tok := range t.Official {
+			twinTokens = append(twinTokens, strings.TrimPrefix(tok, "resource:"))
 		}
 	}
 	token := engine.TokenPrefix + e.Token
@@ -248,6 +385,32 @@ func (g *generator) kind(e private.Expose) (*engine.Kind, error) {
 	}
 	if k.CreatePath == "" {
 		k.CreatePath = k.Collection
+	}
+	if e.ShapeName() == private.ShapeSingleton {
+		k.Shape = engine.ShapeSingleton
+		k.SingletonKey = mk.Name[strings.LastIndex(mk.Name, ".")+1:]
+	}
+	if e.Variant != nil {
+		k.Variant = &engine.Variant{Field: e.Variant.Field, Value: e.Variant.Value}
+		k.OfficialTokens = twinTokens
+	}
+	for _, cd := range g.o.CreateDefaults {
+		if cd.Ref.String() != e.Ref.String() {
+			continue
+		}
+		k.CreateDefaults = map[string]json.RawMessage{}
+		for _, w := range sortedKeys(cd.Fields) {
+			var v any
+			n := cd.Fields[w]
+			if err := n.Decode(&v); err != nil {
+				return nil, fmt.Errorf("%s: createDefaults %s: %w", e.Ref, w, err)
+			}
+			b, err := json.Marshal(normalizeYAML(v))
+			if err != nil {
+				return nil, fmt.Errorf("%s: createDefaults %s: %w", e.Ref, w, err)
+			}
+			k.CreateDefaults[w] = b
+		}
 	}
 	for _, ig := range g.o.ItemGet {
 		if ig.Ref.String() == e.Ref.String() {
@@ -272,6 +435,22 @@ func (g *generator) kind(e private.Expose) (*engine.Kind, error) {
 	fields, err := g.fields(e.Token, mk.Fields, "", ff, nk, true, mk.IDField)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", e.Ref, err)
+	}
+	if k.Variant != nil {
+		// The binding owns the discriminator: not an input, not an output.
+		delete(fields, k.Variant.Field)
+	}
+	for w := range k.CreateDefaults {
+		if f := fields[w]; f == nil || !f.OutputOnly {
+			return nil, fmt.Errorf("%s: createDefaults %s must be an outputOnly field (sent on create, never managed)", e.Ref, w)
+		}
+	}
+	if mk.API == kind.APIClassic {
+		for _, w := range sortedKeys(fields) {
+			if strings.HasPrefix(w, "x_") && !fields[w].Secret {
+				return nil, fmt.Errorf("%s: classic field %s is an x_ field but not secret (the controller's secret convention; probe f2)", e.Ref, w)
+			}
+		}
 	}
 	k.Fields = fields
 	for _, p := range e.NaturalKey {
@@ -338,7 +517,8 @@ func (g *generator) field(tok string, mf *kind.Field, wire, path string, ff *fac
 	if d, ok := ff.defaults[path]; ok {
 		f.Default = d
 	}
-	f.Required = (mf.Required && len(f.Default) == 0 || ff.implicitRequired[path] || nk[path]) && !mf.ReadOnly
+	f.OutputOnly = ff.outputOnly[path]
+	f.Required = (mf.Required && len(f.Default) == 0 || ff.implicitRequired[path] || nk[path]) && !mf.ReadOnly && !f.OutputOnly
 	f.Constraints = constraints(mf)
 	switch mf.Type {
 	case kind.TypeObject:

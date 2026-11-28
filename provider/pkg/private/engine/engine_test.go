@@ -165,7 +165,11 @@ func TestCreateReadUpdateDelete(t *testing.T) {
 		t.Fatalf("id %q", id)
 	}
 	reqs := srv.Requests()
-	post := reqs[0]
+	// Natural-key uniqueness (rule 3): the create lists by key first.
+	if reqs[0].Method != "GET" || reqs[0].Path != "/v2/api/site/default/things" {
+		t.Fatalf("first create request %s %s, want the natural-key list", reqs[0].Method, reqs[0].Path)
+	}
+	post := reqs[1]
 	if post.Method != "POST" || post.Path != "/v2/api/site/default/things" {
 		t.Fatalf("create request %s %s", post.Method, post.Path)
 	}
@@ -272,8 +276,11 @@ func TestListFilterAndCreateList(t *testing.T) {
 		t.Fatal(err)
 	}
 	reqs := srv.Requests()
-	if _, isList := reqs[0].Body.([]any); !isList {
-		t.Errorf("create body must be a list: %v", reqs[0].Body)
+	if reqs[0].Method != "GET" || reqs[0].Path != "/v2/api/site/default/groups-all" {
+		t.Errorf("the natural-key check lists the collection first: %s %s", reqs[0].Method, reqs[0].Path)
+	}
+	if _, isList := reqs[1].Body.([]any); !isList {
+		t.Errorf("create body must be a list: %v", reqs[1].Body)
 	}
 	for _, r := range reqs {
 		if r.Method == "GET" && strings.HasPrefix(r.Path, "/v2/api/site/default/groups/") {
