@@ -355,3 +355,29 @@ supports IPv6.
 - (d) the IPv6 ACL kind cannot be built on Network 10.4.57: the server refuses the variant.
 - The official ordering resource must own the complete rule list, and `TrafficMatchMac` (to be
   `AclRuleMac`) needs `networkIdFilter` restored as required.
+
+## Slice 2 step 3 probe (classic kinds; IPv6 on the next pin)
+
+Measured while building slice 2 step 3 (docs/design/private-binding.md §S2.14 rows 20-35). Classic
+rows: the Tier-2 seed (wizard completed, key minted) through the edge with the key, Network 10.4.57.
+IPv6 rows: UniFi OS Server 5.1.42 (installer SHA-256 `f6111e93…c22f94d`, Network 10.5.67), booted
+from its own image before the wizard and reached on `:8081` directly (no key exists before the
+wizard, so the official API, and with it the ordering, could not be probed on 10.5.67).
+
+| Request | Answer |
+|---|---|
+| `GET rest/setting/ntp` | 200 `{meta,data:[the one ntp document]}` with `_id`, `key: ntp`, `site_id` (`get/setting/ntp` answers the same) |
+| `GET rest/usergroup` | 200 with every group, including the built-in `Default` (`qos_rate_max_*` = -1, `attr_no_delete`) |
+| `POST rest/usergroup` without `qos_rate_max_up` | 200; the field is then absent from the object |
+| `POST rest/usergroup` with `qos_rate_max_down: 1` | 400 `api.err.InvalidPayload`, `validationError{field: qos_rate_max_down, pattern}` |
+| `DELETE rest/usergroup/{absent or malformed id}`, `GET rest/usergroup/{malformed id}` | 400 `api.err.IdInvalid` for both kinds of id; the GET answers 200 `data:[]` |
+| `PUT rest/setting/ntp/{_id}` with `setting_preference: auto` and other server names | 200, but the answer and every later read hold the controller's own four servers: in `auto` mode the controller puts them back, whatever the body says (found by the edge e2e drop-reset row) |
+| 10.5.67 `stat/sysinfo` before the wizard | 200, `version` 10.5.67 |
+| 10.5.67 v2 `POST acl-rules` `type: IPV4` (full body) | 201, as on 10.4.57 |
+| 10.5.67 v2 `POST acl-rules` `type: IPV6` with IPv6 subnets | 400 "must be valid IPv4 or Subnet" on both endpoints |
+| 10.5.67 v2 `POST acl-rules` `type: IPV6` with IPv4 subnets; `PUT` of an IPV4 rule to `IPV6` | 500 (an HTML error page); `server.log`: "IPv6 ACL is not supported yet" |
+
+So no measured Network version accepts IPv6 ACL rules yet: `unifi:network:AclRuleIpv6` stays built
+and Tier-1 tested but not served (`servedFrom` unset), and its live round trip and its interplay with
+the official ordering remain not run. The probe container and image were removed; the IPV4 test rule
+was deleted.

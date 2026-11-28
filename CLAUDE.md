@@ -136,8 +136,10 @@ Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
   import/destroy for the 4 `unifi:network:*` kinds. See `test/e2e-private/README.md`.
 - **Edge tier — `make test-e2e-edge`** (Tier-2 seed + the pinned installer; OFFLINE/local): the same
   private driver in edge mode on the seeded, wizard-completed controller, through the authenticated
-  edge with the seed's key (`E2E_DRIVERS=edge test/e2e/run.sh`). `make test-live` runs the gRPC, CLI
-  and edge drivers on one boot.
+  edge with the seed's key (`E2E_DRIVERS=edge test/e2e/run.sh`): the 4 v2 kinds, then (edge only) the
+  classic `UserGroup` and the `SettingNtp` settings singleton (adopt on create, release on destroy; the
+  original ntp settings are put back and checked). `make test-live` runs the gRPC, CLI and edge drivers
+  on one boot.
 
 ## Gotchas
 
@@ -163,6 +165,12 @@ Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
   by `provider/pkg/engine` through `provider/pkg/binding/official` over `provider/pkg/controller`, not by
   the framework. A variant's own `required` list is lifted into `requiredInputs` (`pass_variant_required.go`).
   See docs/design/private-binding.md Part 2.
+- **Private kinds at `PRIVATE=1` (slice 2):** 4 v2 kinds, the classic `UserGroup` and the settings
+  singleton `SettingNtp` (`shape: singleton`). `AclRuleIpv6` (the G-Q4 variant exception: only
+  `type: IPV6`, which the official API does not serve) is built and Tier-1 tested but **NOT SERVED**:
+  Network 10.4.57 and 10.5.67 both refuse IPv6 ACL rules, so `kinds.yaml` leaves `servedFrom` unset.
+  `CheckTwinVariants` (in `make test`) fails once the official API serves IPV6 itself. Classic kinds
+  need measured `verbs:`/`listPath:`/`itemGet:` entries (the model leaves them unknown).
 - **Determinism:** re-running `make generate` must produce no diff in `schema.json` / `metadata.json` /
   `sdk/`; keep `ensureSchemaTitles`.
 - Test write round-trips on a **throwaway test SSID** only; never commit a real `X-API-Key`.
