@@ -9,18 +9,32 @@
 // `make test-e2e-private` (or test/e2e-private/run.sh); it needs:
 //
 //	E2E_PULUMI    the Pulumi CLI binary
-//	E2E_BASE_URL  the Network application, e.g. http://127.0.0.1:18081
 //	E2E_WORK      a scratch directory (Pulumi home, file backend, program copy)
 //	PATH          with the plugin directory and the SDK venv's bin first
 //
-// No apiKey is used: the controller is reached directly, before the wizard.
+// and, by mode (E2E_MODE):
+//
+//	direct (default, `make test-e2e-private`): E2E_BASE_URL, the Network
+//	  application reached directly before the wizard, e.g.
+//	  http://127.0.0.1:18081. No apiKey; the stacks set unifi:networkBaseUrl.
+//	edge (`make test-e2e-edge`, private-binding.md §S2.10): E2E_API_HOST, the
+//	  UniFi OS edge of the seeded, wizard-completed controller, e.g.
+//	  127.0.0.1:11443, and UNIFI_APIKEY, the seed's throwaway key, which
+//	  run.sh reads from test/e2e/seed.env into the environment. The stacks set
+//	  unifi:apiHost and unifi:allowInsecure only; the provider reaches the
+//	  private API through https://<apiHost>/proxy/network with the key, and so
+//	  do the raw checks. The key is never logged, put on a command line or in
+//	  stack config.
+//
 // The Pulumi CLI and the provider get the caller's environment without its
-// UNIFI_* provider variables (childEnv), and the stacks pin siteId, so a
-// developer's real key or site never reaches the throwaway controller.
+// UNIFI_* provider variables (childEnv; in edge mode UNIFI_APIKEY alone is
+// passed on), and the stacks pin siteId, so a developer's real key or site
+// never reaches the throwaway controller.
 package e2e
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -66,11 +80,19 @@ const site = "default"
 
 type ctl struct {
 	t    *testing.T
-	base string
+	base string // the Network application root (direct, or <edge>/proxy/network)
 	http *http.Client
+	key  string // X-API-Key for the edge; empty in direct mode. Never logged.
 }
 
 func (c *ctl) do(method, path string, body any) (int, []byte) {
+	c.t.Helper()
+	return c.doURL(method, c.base+"/v2/api/site/"+site+"/"+path, body, true)
+}
+
+// doURL sends one raw request; withKey=false omits the key (the edge must
+// refuse it).
+func (c *ctl) doURL(method, url string, body any, withKey bool) (int, []byte) {
 	c.t.Helper()
 	var rd io.Reader
 	if body != nil {
@@ -80,14 +102,17 @@ func (c *ctl) do(method, path string, body any) (int, []byte) {
 		}
 		rd = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, c.base+"/v2/api/site/"+site+"/"+path, rd)
+	req, err := http.NewRequest(method, url, rd)
 	if err != nil {
 		c.t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if withKey && c.key != "" {
+		req.Header.Set("X-API-Key", c.key)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		c.t.Fatalf("%s %s: %v", method, path, err)
+		c.t.Fatalf("%s %s: %v", method, url, err)
 	}
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)
@@ -296,10 +321,33 @@ func changes(t *testing.T, out string) []previewStep {
 
 func TestPrivateE2E(t *testing.T) {
 	bin := env(t, "E2E_PULUMI")
-	base := strings.TrimRight(env(t, "E2E_BASE_URL"), "/")
 	work := env(t, "E2E_WORK")
+	mode := os.Getenv("E2E_MODE")
+	if mode == "" {
+		mode = "direct"
+	}
 
-	c := &ctl{t: t, base: base, http: &http.Client{Timeout: 30 * time.Second}}
+	// provider is the stack config that points the provider at the
+	// controller; base is the Network root the raw checks use.
+	var provider map[string]string
+	var base string
+	c := &ctl{t: t, http: &http.Client{Timeout: 30 * time.Second}}
+	switch mode {
+	case "direct":
+		base = strings.TrimRight(env(t, "E2E_BASE_URL"), "/")
+		provider = map[string]string{"unifi:networkBaseUrl": base, "unifi:siteId": "default"}
+	case "edge":
+		host := env(t, "E2E_API_HOST")
+		c.key = env(t, "UNIFI_APIKEY")
+		// The seeded controller's edge has a self-signed certificate, as the
+		// provider's allowInsecure accepts.
+		c.http.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // #nosec G402 -- throwaway test controller
+		base = "https://" + host + "/proxy/network"
+		provider = map[string]string{"unifi:apiHost": host, "unifi:allowInsecure": "true", "unifi:siteId": "default"}
+	default:
+		t.Fatalf("E2E_MODE=%q: want direct or edge", mode)
+	}
+	c.base = base
 	prefix := fmt.Sprintf("e2e-%d", time.Now().Unix())
 
 	prog := filepath.Join(work, "program")
@@ -311,14 +359,14 @@ func TestPrivateE2E(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	p := &cli{t: t, bin: bin, dir: prog, logs: filepath.Join(work, "pulumi.log"), env: append(childEnv(),
+	p := &cli{t: t, bin: bin, dir: prog, logs: filepath.Join(work, "pulumi.log"), env: append(childEnv(mode == "edge"),
 		"PULUMI_HOME="+home,
 		"PULUMI_BACKEND_URL=file://"+state,
 		"PULUMI_SKIP_UPDATE_CHECK=1",
 		"PULUMI_CONFIG_PASSPHRASE=e2e-private-throwaway",
 		"PULUMI_DIY_BACKEND_NO_LEGACY_WARNING=1",
 	)}
-	t.Logf("work dir %s, object prefix %s, controller %s", work, prefix, base)
+	t.Logf("mode %s, work dir %s, object prefix %s, controller %s", mode, work, prefix, base)
 
 	// Teardown: destroy whatever the stacks still hold, then sweep any object
 	// this run created that a failed step left behind.
@@ -340,6 +388,9 @@ func TestPrivateE2E(t *testing.T) {
 	})
 
 	stackInit := func(name string, cfg map[string]string) {
+		for k, v := range provider {
+			cfg[k] = v
+		}
 		p.must("stack", "init", name)
 		keys := make([]string, 0, len(cfg))
 		for k := range cfg {
@@ -372,9 +423,23 @@ func TestPrivateE2E(t *testing.T) {
 		}
 	}
 
+	if mode == "edge" {
+		step(t, "0-edge-needs-the-key", func(t *testing.T) {
+			// Post-wizard, the edge refuses the private API without the key
+			// (probe b4/b5), so every later step proves key-authenticated
+			// private reads and writes.
+			for _, u := range []string{base + "/v2/api/site/" + site + "/apgroups", base + "/api/s/" + site + "/stat/sysinfo"} {
+				if code, _ := c.doURL("GET", u, nil, false); code != http.StatusUnauthorized {
+					t.Errorf("GET %s without the key: HTTP %d, want 401", u, code)
+				}
+				if code, b := c.doURL("GET", u, nil, true); code != http.StatusOK {
+					t.Errorf("GET %s with the key: HTTP %d: %.200s", u, code, b)
+				}
+			}
+		})
+	}
+
 	stackInit("main", map[string]string{
-		"unifi:networkBaseUrl":     base,
-		"unifi:siteId":             "default",
 		"unifi-e2e-private:prefix": prefix,
 		"unifi-e2e-private:step":   "1",
 		"unifi-e2e-private:mode":   "main",
@@ -483,8 +548,6 @@ func TestPrivateE2E(t *testing.T) {
 		// Rule 3: a fresh stack adopts live objects by natural key, both the
 		// bare form and field=value, then declares them with no changes.
 		stackInit("imp", map[string]string{
-			"unifi:networkBaseUrl":     base,
-			"unifi:siteId":             "default",
 			"unifi-e2e-private:prefix": prefix,
 			"unifi-e2e-private:step":   "2",
 			"unifi-e2e-private:mode":   "import",
@@ -553,10 +616,11 @@ func TestPrivateE2E(t *testing.T) {
 
 // childEnv is os.Environ() without the provider's UNIFI_* variables (apiKey,
 // apiHost, siteId, networkBaseUrl, allowInsecure), so none of a developer's
-// real controller settings leak into this tier.
-func childEnv() []string {
+// real controller settings leak into this tier. keepKey passes UNIFI_APIKEY on
+// (edge mode: run.sh set it from the seed's throwaway key).
+func childEnv(keepKey bool) []string {
 	drop := map[string]bool{
-		"UNIFI_APIKEY": true, "UNIFI_API_HOST": true, "UNIFI_SITEID": true,
+		"UNIFI_APIKEY": !keepKey, "UNIFI_API_HOST": true, "UNIFI_SITEID": true,
 		"UNIFI_NETWORK_BASE_URL": true, "UNIFI_ALLOW_INSECURE": true,
 	}
 	var out []string

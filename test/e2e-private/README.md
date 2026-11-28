@@ -30,6 +30,19 @@ make test-e2e-private
 Prereqs: Docker with privileged containers, Go 1.26, Python 3, `curl`. No API key and no
 `hieutq` image are involved.
 
+## Edge mode (`make test-e2e-edge`)
+
+The same driver also runs post-wizard, through the authenticated UniFi OS edge, on the Tier-2
+seeded controller (`docs/design/private-binding.md` §S2.10): `test/e2e/run.sh` with
+`E2E_DRIVERS=edge` boots the seed, builds the `PRIVATE=1` plugin and SDK, and runs `e2e_test.go`
+with `E2E_MODE=edge`, `E2E_API_HOST=127.0.0.1:11443` and the seed's throwaway key in
+`UNIFI_APIKEY` (read from `test/e2e/seed.env`, never on a command line or in stack config). The
+stacks then set `unifi:apiHost`, `unifi:allowInsecure=true` and `unifi:siteId=default` (no
+`networkBaseUrl`), so the provider reaches the private API at `https://<apiHost>/proxy/network`
+with the same key as the official API; the raw checks go the same way. Step 0 checks that the edge
+answers 401 without the key. Steps 1-6 are the table below. This tier (direct mode) is unchanged:
+pre-wizard, no key, the only live tier that needs no seed.
+
 ## What `run.sh` does
 
 1. **Build.** `make PRIVATE=1 build python_sdk` (installer → model → merged schema → plugin and

@@ -27,9 +27,18 @@
 #
 # The boot recipe (image, seed restore, sandbox workarounds, readiness) is the
 # shared live harness test/live/lib.sh (docs/design/private-binding.md §S2.10).
-# Two drivers run against one boot: the gRPC tests (provider/pkg/provider,
-# tag e2e) and the Pulumi CLI driver (test/e2e/cli: ACL rules, ordering, alias
-# migration). The key is read from seed.env into the environment only.
+# Up to three drivers run against one boot, chosen by E2E_DRIVERS (default
+# "grpc cli"):
+#   grpc  the gRPC tests (provider/pkg/provider, tag e2e)
+#   cli   the Pulumi CLI driver (test/e2e/cli: ACL rules, ordering, alias
+#         migration), PRIVATE=0 SDK
+#   edge  the private-API driver (test/e2e-private, E2E_MODE=edge): builds the
+#         PRIVATE=1 plugin + SDK (needs the pinned installer, UOS_INSTALLER=)
+#         and runs the 4 private kinds through the authenticated edge with the
+#         seed's key, post-wizard (private-binding.md §S2.10)
+# `make test-e2e` runs "grpc cli", `make test-e2e-edge` "edge", `make test-live`
+# all three on one boot. The key is read from seed.env into the environment
+# only.
 set -euo pipefail
 
 # --- resolve paths so this works from any cwd -------------------------------
@@ -46,6 +55,13 @@ ARTIFACT="$ROOT/provider/cmd/pulumi-resource-unifi/schema.json"
 
 # Make `go` discoverable even when invoked from a bare shell (cron, IDE, etc.).
 command -v go >/dev/null 2>&1 || export PATH="$PATH:/usr/local/go/bin:$HOME/go/bin:/opt/homebrew/bin"
+
+# --- drivers -------------------------------------------------------------------
+DRIVERS="${E2E_DRIVERS:-grpc cli}"
+has_driver() { case " $DRIVERS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+for d in $DRIVERS; do
+  case "$d" in grpc|cli|edge) ;; *) echo "ERROR: unknown E2E_DRIVERS entry '$d' (grpc, cli, edge)" >&2; exit 2 ;; esac
+done
 
 # --- args --------------------------------------------------------------------
 KEEP_UP=
@@ -100,9 +116,12 @@ teardown() {
   fi
   echo "==> tearing down"
   live_teardown
-  if [ "$rc" -ne 0 ] && [ -f "$WORK/pulumi.log" ]; then
-    echo "==> last Pulumi output (full transcript was $WORK/pulumi.log):"
-    tail -n 60 "$WORK/pulumi.log" || true
+  if [ "$rc" -ne 0 ]; then
+    for f in "$WORK/pulumi.log" "$WORK/edge/pulumi.log"; do
+      [ -f "$f" ] || continue
+      echo "==> last Pulumi output (full transcript was $f):"
+      tail -n 60 "$f" || true
+    done
   fi
   echo "==> run log:"; cat "$LIVE_LOG" 2>/dev/null || true
   rm -rf "$WORK"
@@ -122,18 +141,40 @@ live_sandbox_fixups
 live_wait_ready
 
 # --- 4. the gRPC e2e tests ----------------------------------------------------
-echo "==> running the gRPC e2e tests against the live controller"
-UNIFI_E2E_ADDR="$ADDR" \
-  go -C "$ROOT/provider" test -tags e2e -count=1 -run TestE2E ./pkg/provider/ ${GOTEST_ARGS[@]+"${GOTEST_ARGS[@]}"}
+if has_driver grpc; then
+  echo "==> running the gRPC e2e tests against the live controller"
+  UNIFI_E2E_ADDR="$ADDR" \
+    go -C "$ROOT/provider" test -tags e2e -count=1 -run TestE2E ./pkg/provider/ ${GOTEST_ARGS[@]+"${GOTEST_ARGS[@]}"}
+fi
 
 # --- 5. the Pulumi CLI driver (PRIVATE=0 SDK) ---------------------------------
-echo "==> building the PRIVATE=0 Python SDK venv for the CLI driver"
-VENV="$ROOT/build/e2e/venv"
-[ -x "$VENV/bin/python" ] || python3 -m venv "$VENV"
-"$VENV/bin/pip" install --quiet --disable-pip-version-check "$ROOT/sdk/python"
-"$VENV/bin/pip" install --quiet --disable-pip-version-check --no-deps --force-reinstall "$ROOT/sdk/python"
-echo "==> running the CLI driver (ACL rules, ordering, alias migration)"
-(cd "$SCRIPT_DIR/cli" && PATH="$ROOT/bin:$VENV/bin:$(dirname "$PULUMI"):$PATH" \
-  E2E_PULUMI="$PULUMI" E2E_API_HOST="$ADDR" E2E_WORK="$WORK" \
-  go test -tags e2e_cli -count=1 -v -timeout 30m -run TestCLIE2E . ${GOTEST_ARGS[@]+"${GOTEST_ARGS[@]}"})
-echo "==> Tier-2 e2e PASSED"
+if has_driver cli; then
+  echo "==> building the PRIVATE=0 Python SDK venv for the CLI driver"
+  VENV="$ROOT/build/e2e/venv"
+  [ -x "$VENV/bin/python" ] || python3 -m venv "$VENV"
+  "$VENV/bin/pip" install --quiet --disable-pip-version-check "$ROOT/sdk/python"
+  "$VENV/bin/pip" install --quiet --disable-pip-version-check --no-deps --force-reinstall "$ROOT/sdk/python"
+  echo "==> running the CLI driver (ACL rules, ordering, alias migration)"
+  (cd "$SCRIPT_DIR/cli" && PATH="$ROOT/bin:$VENV/bin:$(dirname "$PULUMI"):$PATH" \
+    E2E_PULUMI="$PULUMI" E2E_API_HOST="$ADDR" E2E_WORK="$WORK" \
+    go test -tags e2e_cli -count=1 -v -timeout 30m -run TestCLIE2E . ${GOTEST_ARGS[@]+"${GOTEST_ARGS[@]}"})
+fi
+
+# --- 6. the private-API driver through the authenticated edge (PRIVATE=1) -----
+# Runs last: it rebuilds the plugin and SDK with PRIVATE=1, which the PRIVATE=0
+# drivers above must not see.
+if has_driver edge; then
+  echo "==> building the PRIVATE=1 plugin and Python SDK for the edge driver"
+  make -C "$ROOT" PRIVATE=1 build python_sdk
+  EVENV="$ROOT/build/e2e-private/venv"
+  [ -x "$EVENV/bin/python" ] || python3 -m venv "$EVENV"
+  "$EVENV/bin/pip" install --quiet --disable-pip-version-check "$ROOT/sdk/python"
+  "$EVENV/bin/pip" install --quiet --disable-pip-version-check --no-deps --force-reinstall "$ROOT/sdk/python"
+  echo "==> running the private-API driver through the edge (4 private kinds, post-wizard, with the key)"
+  mkdir -p "$WORK/edge"
+  (cd "$ROOT/test/e2e-private" && PATH="$ROOT/bin:$EVENV/bin:$(dirname "$PULUMI"):$PATH" \
+    E2E_MODE=edge E2E_PULUMI="$PULUMI" E2E_API_HOST="$ADDR" E2E_WORK="$WORK/edge" \
+    go test -tags e2e_private -count=1 -v -timeout 20m -run TestPrivateE2E . ${GOTEST_ARGS[@]+"${GOTEST_ARGS[@]}"})
+  live_log "edge driver passed"
+fi
+echo "==> Tier-2 e2e PASSED (drivers: $DRIVERS)"

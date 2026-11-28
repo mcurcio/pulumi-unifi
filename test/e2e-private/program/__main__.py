@@ -8,8 +8,10 @@ from stack config so one program serves every step:
   mode    "main" (the 4 kinds) or "import" (the objects a fresh stack adopts
           by natural key; declared exactly as step 2 declares them)
 
-No apiKey: the e2e reaches the Network application directly, before the
-setup wizard (unifi:networkBaseUrl).
+The provider config comes from the driver's stack config: in direct mode the
+Network application before the setup wizard (unifi:networkBaseUrl, no
+apiKey); in edge mode the seeded controller's UniFi OS edge (unifi:apiHost,
+unifi:allowInsecure, and the apiKey from the environment).
 """
 
 import pulumi

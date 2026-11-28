@@ -39,7 +39,7 @@ BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: uos-fetch uos-model private-check uos-parity test-e2e-private ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
+.PHONY: uos-fetch uos-model private-check uos-parity test-e2e-private test-e2e-edge test-live ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
 
 DOCSVENV     := $(WORKING_DIR)/.docsvenv
 
@@ -189,6 +189,20 @@ e2e-bootstrap::
 # Docker + git-lfs (the seed is an LFS object); see test/e2e/README.md.
 test-e2e:: build
 	./test/e2e/run.sh
+
+# The private-API kinds through the AUTHENTICATED edge on the same seeded,
+# wizard-completed controller (docs/design/private-binding.md §S2.10): the
+# PRIVATE=1 plugin + SDK, the test/e2e-private driver in edge mode, the seed's
+# key (read from test/e2e/seed.env into the environment only). Needs the pinned
+# installer (UOS_INSTALLER=<path>) and PULUMI=<the 3.230.0 CLI>. Leaves the
+# PRIVATE=1 artifacts built, like test-e2e-private.
+test-e2e-edge:: build
+	E2E_DRIVERS=edge ./test/e2e/run.sh
+
+# One boot of the seeded controller for every live driver: the gRPC tests, the
+# CLI driver (PRIVATE=0), then the edge driver (PRIVATE=1).
+test-live:: build
+	E2E_DRIVERS="grpc cli edge" ./test/e2e/run.sh
 
 # --- Private API: the model extractor (docs/design/private-binding.md) -------
 # None of these run in stock CI (an 875 MB download). They never write

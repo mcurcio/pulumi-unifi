@@ -181,6 +181,22 @@ step with raw HTTP against the official API (docs/design/private-binding.md
 The key is read from `seed.env` into the environment (`UNIFI_APIKEY`) only: never
 on a command line, in Pulumi config or in the transcript.
 
+### The private-API driver through the edge (`make test-e2e-edge`)
+
+`E2E_DRIVERS` picks the drivers `run.sh` runs on one boot: `grpc cli` (the
+default, `make test-e2e`), `edge` (`make test-e2e-edge`) or all three
+(`make test-live`). The `edge` driver runs last: it builds the `PRIVATE=1`
+plugin and SDK (needs the pinned installer, `UOS_INSTALLER=<path>`), then runs
+the [`test/e2e-private`](../e2e-private/README.md) driver with `E2E_MODE=edge`
+against this seeded, wizard-completed controller
+(docs/design/private-binding.md §S2.10): the 4 private kinds (`QosRule`,
+`ApGroup`, `NetworkMembersGroup`, `FirewallAppBlock`) through
+`https://127.0.0.1:11443/proxy/network` with the seed's key, the stack config
+holding only `unifi:apiHost`, `unifi:allowInsecure=true` and `unifi:siteId=default`.
+A first step checks that the edge refuses the private API without the key (401),
+so the rest proves key-authenticated private reads and writes. The key reaches
+the driver and the provider as `UNIFI_APIKEY` in the environment only.
+
 ### Sandbox workarounds (`test/live/`)
 
 The boot recipe is the shared harness [`test/live/lib.sh`](../live/lib.sh). On a
