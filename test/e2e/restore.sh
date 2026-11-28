@@ -42,10 +42,13 @@ docker volume rm "$VOL" >/dev/null 2>&1 || true
 docker volume create "$VOL" >/dev/null
 
 echo "==> untarring seed into $VOL (perms preserved)"
-docker run --rm \
+# The UniFi OS image's own tar (no extra image to pull; test/live/lib.sh does
+# the same). E2E_IMAGE overrides the pinned reference.
+IMAGE="${E2E_IMAGE:-hieutq/unifi-os-server@sha256:3e8854769d634ed5b7b4610b187479226fb8f47178552d1764b1b1db68c8621e}"
+docker run --rm --entrypoint /bin/sh \
   -v "$VOL":/unifi \
   -v "$SEED_ABS":/seed/unifi-seed.tgz:ro \
-  alpine:3 \
-  sh -c "tar -xpzf /seed/unifi-seed.tgz -C /unifi && rm -f /unifi/data/postgresql/postmaster.pid /unifi/db/mongod.lock 2>/dev/null; true"
+  "$IMAGE" \
+  -c "tar -xpzf /seed/unifi-seed.tgz -C /unifi && rm -f /unifi/data/postgresql/postmaster.pid /unifi/db/mongod.lock 2>/dev/null; true"
 
 echo "==> restore complete"

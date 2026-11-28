@@ -29,7 +29,7 @@ services:
     # Network 10.4.57 in UniFi OS 5.1.15). PINNED BY DIGEST (pin-and-verify ethos,
     # cf. openapi/fetch.sh) so the restored volume's Postgres/Mongo data always
     # matches the exact DB versions that wrote it. Re-pin on a version bump.
-    image: hieutq/unifi-os-server@sha256:3e8854769d634ed5b7b4610b187479226fb8f47178552d1764b1b1db68c8621e
+    image: ${E2E_IMAGE:-hieutq/unifi-os-server@sha256:3e8854769d634ed5b7b4610b187479226fb8f47178552d1764b1b1db68c8621e}
     # Full UniFi OS = systemd PID 1 managing ~10 services (unifi-core, Postgres,
     # Mongo, nginx, the Network app, rabbitmq…). These privileges are the price of
     # the only image that authenticates the Integration API. This is why the tier

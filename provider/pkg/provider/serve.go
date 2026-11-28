@@ -7,10 +7,18 @@ import (
 	rpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 )
 
+// Wrap decorates the framework's server, e.g. with the private-API dispatcher
+// (provider/pkg/private). A nil Wrap serves the framework as is.
+type Wrap func(rpc.ResourceProviderServer) (rpc.ResourceProviderServer, error)
+
 // Serve launches the gRPC server for the UniFi resource provider.
-func Serve(providerName, version string, pulumiSchema, openapiDocBytes, metadataBytes []byte) {
+func Serve(providerName, version string, pulumiSchema, openapiDocBytes, metadataBytes []byte, wrap Wrap) {
 	err := provider.Main(providerName, func(host *provider.HostClient) (rpc.ResourceProviderServer, error) {
-		return makeProvider(host, providerName, version, pulumiSchema, openapiDocBytes, metadataBytes)
+		fw, err := makeProvider(host, providerName, version, pulumiSchema, openapiDocBytes, metadataBytes)
+		if err != nil || wrap == nil {
+			return fw, err
+		}
+		return wrap(fw)
 	})
 	if err != nil {
 		cmdutil.ExitError(err.Error())

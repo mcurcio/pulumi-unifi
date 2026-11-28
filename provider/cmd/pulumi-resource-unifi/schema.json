@@ -411,6 +411,22 @@
         "unifi:sites/v1:AccessPointFeatureOverview": {
             "type": "object"
         },
+        "unifi:sites/v1:AclRuleOrderingUnlisted": {
+            "description": "What happens to the live entries the program does not list.",
+            "type": "string",
+            "enum": [
+                {
+                    "name": "Last",
+                    "description": "They follow the listed entries, in their current relative order.",
+                    "value": "LAST"
+                },
+                {
+                    "name": "Reject",
+                    "description": "The update fails and names every unlisted entry.",
+                    "value": "REJECT"
+                }
+            ]
+        },
         "unifi:sites/v1:AdoptedDeviceDetails": {
             "properties": {
                 "adoptedAt": {
@@ -3733,6 +3749,284 @@
         }
     },
     "resources": {
+        "unifi:sites/v1:AclRuleIpv4": {
+            "description": "An IPv4 ACL rule on UniFi. Its position in the site's rule order is set with AclRuleOrdering.",
+            "properties": {
+                "action": {
+                    "$ref": "#/types/unifi:sites/v1:ACLRuleAction",
+                    "description": "ACL rule action"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "ACL rule description"
+                },
+                "destinationFilter": {
+                    "$ref": "pulumi.json#/Any",
+                    "description": "Traffic destination filter"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "enforcingDeviceFilter": {
+                    "$ref": "#/types/unifi:sites/v1:ACLRuleDeviceFilter",
+                    "description": "IDs of the Switch-capable devices used to enforce the ACL rule. When null, the rule will be provisioned to all switches on the site."
+                },
+                "index": {
+                    "type": "integer",
+                    "description": "ACL rule index. Lower index has higher priority"
+                },
+                "metadata": {
+                    "$ref": "#/types/unifi:sites/v1:UserDefinedOrDerivedEntityMetadata",
+                    "description": "Only user-defined rules can be deleted or modified"
+                },
+                "name": {
+                    "type": "string",
+                    "description": "ACL rule name"
+                },
+                "protocolFilter": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/types/unifi:sites/v1:ProtocolFilterItem"
+                    },
+                    "description": "Protocols this ACL rule will be applied to. When null, the rule will be applied to all protocols."
+                },
+                "sourceFilter": {
+                    "$ref": "pulumi.json#/Any",
+                    "description": "Traffic source filter"
+                },
+                "type": {
+                    "type": "string"
+                }
+            },
+            "type": "object",
+            "required": [
+                "action",
+                "enabled",
+                "index",
+                "metadata",
+                "name"
+            ],
+            "inputProperties": {
+                "action": {
+                    "$ref": "#/types/unifi:sites/v1:ACLRuleAction",
+                    "description": "ACL rule action"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "ACL rule description"
+                },
+                "destinationFilter": {
+                    "$ref": "#/types/unifi:sites/v1:IPACLRuleEndpoint",
+                    "description": "Traffic destination filter"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "enforcingDeviceFilter": {
+                    "$ref": "#/types/unifi:sites/v1:ACLRuleDeviceFilter",
+                    "description": "IDs of the Switch-capable devices used to enforce the ACL rule. When null, the rule will be provisioned to all switches on the site."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "ACL rule name"
+                },
+                "protocolFilter": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/types/unifi:sites/v1:ProtocolFilterItem"
+                    },
+                    "description": "Protocols this ACL rule will be applied to. When null, the rule will be applied to all protocols."
+                },
+                "siteId": {
+                    "type": "string",
+                    "description": "Overrides the provider-level site for this resource. Changing it moves the resource to another site (a replacement).",
+                    "replaceOnChanges": true
+                },
+                "sourceFilter": {
+                    "$ref": "#/types/unifi:sites/v1:IPACLRuleEndpoint",
+                    "description": "Traffic source filter"
+                },
+                "type": {
+                    "type": "string",
+                    "const": "IPV4",
+                    "default": "IPV4",
+                    "replaceOnChanges": true
+                }
+            },
+            "requiredInputs": [
+                "action",
+                "enabled",
+                "name"
+            ],
+            "aliases": [
+                {
+                    "type": "unifi:sites/v1:TrafficMatchIpv4"
+                }
+            ]
+        },
+        "unifi:sites/v1:AclRuleMac": {
+            "description": "A MAC-address ACL rule on UniFi. Its position in the site's rule order is set with AclRuleOrdering.",
+            "properties": {
+                "action": {
+                    "$ref": "#/types/unifi:sites/v1:ACLRuleAction",
+                    "description": "ACL rule action"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "ACL rule description"
+                },
+                "destinationFilter": {
+                    "$ref": "pulumi.json#/Any",
+                    "description": "Traffic destination filter"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "enforcingDeviceFilter": {
+                    "$ref": "#/types/unifi:sites/v1:ACLRuleDeviceFilter",
+                    "description": "IDs of the Switch-capable devices used to enforce the ACL rule. When null, the rule will be provisioned to all switches on the site."
+                },
+                "index": {
+                    "type": "integer",
+                    "description": "ACL rule index. Lower index has higher priority"
+                },
+                "metadata": {
+                    "$ref": "#/types/unifi:sites/v1:UserDefinedOrDerivedEntityMetadata",
+                    "description": "Only user-defined rules can be deleted or modified"
+                },
+                "name": {
+                    "type": "string",
+                    "description": "ACL rule name"
+                },
+                "networkIdFilter": {
+                    "type": "string",
+                    "description": "Network ID to which this ACL rule applies"
+                },
+                "sourceFilter": {
+                    "$ref": "pulumi.json#/Any",
+                    "description": "Traffic source filter"
+                },
+                "type": {
+                    "type": "string"
+                }
+            },
+            "type": "object",
+            "required": [
+                "action",
+                "enabled",
+                "index",
+                "metadata",
+                "name",
+                "networkIdFilter"
+            ],
+            "inputProperties": {
+                "action": {
+                    "$ref": "#/types/unifi:sites/v1:ACLRuleAction",
+                    "description": "ACL rule action"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "ACL rule description"
+                },
+                "destinationFilter": {
+                    "$ref": "#/types/unifi:sites/v1:MACACLRuleEndpoint",
+                    "description": "Traffic destination filter"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "enforcingDeviceFilter": {
+                    "$ref": "#/types/unifi:sites/v1:ACLRuleDeviceFilter",
+                    "description": "IDs of the Switch-capable devices used to enforce the ACL rule. When null, the rule will be provisioned to all switches on the site."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "ACL rule name"
+                },
+                "networkIdFilter": {
+                    "type": "string",
+                    "description": "Network ID to which this ACL rule applies"
+                },
+                "siteId": {
+                    "type": "string",
+                    "description": "Overrides the provider-level site for this resource. Changing it moves the resource to another site (a replacement).",
+                    "replaceOnChanges": true
+                },
+                "sourceFilter": {
+                    "$ref": "#/types/unifi:sites/v1:MACACLRuleEndpoint",
+                    "description": "Traffic source filter"
+                },
+                "type": {
+                    "type": "string",
+                    "const": "MAC",
+                    "default": "MAC",
+                    "replaceOnChanges": true
+                }
+            },
+            "requiredInputs": [
+                "action",
+                "enabled",
+                "name",
+                "networkIdFilter"
+            ],
+            "aliases": [
+                {
+                    "type": "unifi:sites/v1:TrafficMatchMac"
+                }
+            ]
+        },
+        "unifi:sites/v1:AclRuleOrdering": {
+            "description": "The order of a site's ACL rules (first match wins). The listed rules form the leading block of the order, in the declared order; rules the program does not list follow in their current relative order (unlisted: LAST) or fail the update (unlisted: REJECT). Destroying it leaves the order as it is.",
+            "properties": {
+                "effectiveOrder": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "The site's full live order, as last read."
+                },
+                "orderedAclRuleIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "The entries this resource orders. They form the leading block of the site's order, in this order (first match wins). Entries not listed here follow them (see unlisted)."
+                },
+                "unlisted": {
+                    "$ref": "#/types/unifi:sites/v1:AclRuleOrderingUnlisted",
+                    "description": "What happens to live entries not listed: LAST keeps them after the listed ones, in their current relative order; REJECT fails the update.",
+                    "default": "LAST"
+                }
+            },
+            "type": "object",
+            "required": [
+                "effectiveOrder",
+                "orderedAclRuleIds",
+                "unlisted"
+            ],
+            "inputProperties": {
+                "orderedAclRuleIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "The entries this resource orders. They form the leading block of the site's order, in this order (first match wins). Entries not listed here follow them (see unlisted)."
+                },
+                "siteId": {
+                    "type": "string",
+                    "description": "Overrides the provider-level site for this resource. Changing it moves the resource to another site (a replacement).",
+                    "replaceOnChanges": true
+                },
+                "unlisted": {
+                    "$ref": "#/types/unifi:sites/v1:AclRuleOrderingUnlisted",
+                    "description": "What happens to live entries not listed: LAST keeps them after the listed ones, in their current relative order; REJECT fails the update.",
+                    "default": "LAST"
+                }
+            },
+            "requiredInputs": [
+                "orderedAclRuleIds"
+            ]
+        },
         "unifi:sites/v1:DnsARecord": {
             "description": "An A DNS record (maps a domain to an IPv4 address) managed via the UniFi DNS policy API.",
             "properties": {
@@ -3791,7 +4085,10 @@
                 }
             },
             "requiredInputs": [
-                "enabled"
+                "enabled",
+                "domain",
+                "ipv4Address",
+                "ttlSeconds"
             ]
         },
         "unifi:sites/v1:DnsAaaaRecord": {
@@ -3852,7 +4149,10 @@
                 }
             },
             "requiredInputs": [
-                "enabled"
+                "enabled",
+                "domain",
+                "ipv6Address",
+                "ttlSeconds"
             ]
         },
         "unifi:sites/v1:DnsCnameRecord": {
@@ -3913,7 +4213,10 @@
                 }
             },
             "requiredInputs": [
-                "enabled"
+                "enabled",
+                "domain",
+                "targetDomain",
+                "ttlSeconds"
             ]
         },
         "unifi:sites/v1:DnsForwardDomain": {
@@ -3967,7 +4270,9 @@
                 }
             },
             "requiredInputs": [
-                "enabled"
+                "enabled",
+                "domain",
+                "ipAddress"
             ]
         },
         "unifi:sites/v1:DnsMxRecord": {
@@ -4028,7 +4333,10 @@
                 }
             },
             "requiredInputs": [
-                "enabled"
+                "enabled",
+                "domain",
+                "mailServerDomain",
+                "priority"
             ]
         },
         "unifi:sites/v1:DnsSrvRecord": {
@@ -4125,7 +4433,14 @@
                 }
             },
             "requiredInputs": [
-                "enabled"
+                "enabled",
+                "domain",
+                "port",
+                "priority",
+                "protocol",
+                "serverDomain",
+                "service",
+                "weight"
             ]
         },
         "unifi:sites/v1:DnsTxtRecord": {
@@ -4179,7 +4494,9 @@
                 }
             },
             "requiredInputs": [
-                "enabled"
+                "enabled",
+                "domain",
+                "text"
             ]
         },
         "unifi:sites/v1:FirewallPolicy": {
@@ -4479,7 +4796,11 @@
             "requiredInputs": [
                 "enabled",
                 "name",
-                "vlanId"
+                "vlanId",
+                "cellularBackupEnabled",
+                "internetAccessEnabled",
+                "ipv4Configuration",
+                "isolationEnabled"
             ]
         },
         "unifi:sites/v1:ManagedNetworkSwitch": {
@@ -4585,7 +4906,11 @@
             "requiredInputs": [
                 "enabled",
                 "name",
-                "vlanId"
+                "vlanId",
+                "cellularBackupEnabled",
+                "deviceId",
+                "ipv4Configuration",
+                "isolationEnabled"
             ]
         },
         "unifi:sites/v1:ManagedNetworkUnmanaged": {
@@ -4658,120 +4983,6 @@
                 "vlanId"
             ]
         },
-        "unifi:sites/v1:TrafficMatchIpv4": {
-            "description": "An IPv4 traffic-matching ACL rule on UniFi.",
-            "properties": {
-                "action": {
-                    "$ref": "#/types/unifi:sites/v1:ACLRuleAction",
-                    "description": "ACL rule action"
-                },
-                "description": {
-                    "type": "string",
-                    "description": "ACL rule description"
-                },
-                "destinationFilter": {
-                    "$ref": "pulumi.json#/Any",
-                    "description": "Traffic destination filter"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "enforcingDeviceFilter": {
-                    "$ref": "#/types/unifi:sites/v1:ACLRuleDeviceFilter",
-                    "description": "IDs of the Switch-capable devices used to enforce the ACL rule. When null, the rule will be provisioned to all switches on the site."
-                },
-                "index": {
-                    "type": "integer",
-                    "description": "ACL rule index. Lower index has higher priority"
-                },
-                "metadata": {
-                    "$ref": "#/types/unifi:sites/v1:UserDefinedOrDerivedEntityMetadata",
-                    "description": "Only user-defined rules can be deleted or modified"
-                },
-                "name": {
-                    "type": "string",
-                    "description": "ACL rule name"
-                },
-                "protocolFilter": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/types/unifi:sites/v1:ProtocolFilterItem"
-                    },
-                    "description": "Protocols this ACL rule will be applied to. When null, the rule will be applied to all protocols."
-                },
-                "sourceFilter": {
-                    "$ref": "pulumi.json#/Any",
-                    "description": "Traffic source filter"
-                },
-                "type": {
-                    "type": "string"
-                }
-            },
-            "type": "object",
-            "required": [
-                "action",
-                "enabled",
-                "index",
-                "metadata",
-                "name"
-            ],
-            "inputProperties": {
-                "action": {
-                    "$ref": "#/types/unifi:sites/v1:ACLRuleAction",
-                    "description": "ACL rule action"
-                },
-                "description": {
-                    "type": "string",
-                    "description": "ACL rule description"
-                },
-                "destinationFilter": {
-                    "$ref": "#/types/unifi:sites/v1:IPACLRuleEndpoint",
-                    "description": "Traffic destination filter"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "enforcingDeviceFilter": {
-                    "$ref": "#/types/unifi:sites/v1:ACLRuleDeviceFilter",
-                    "description": "IDs of the Switch-capable devices used to enforce the ACL rule. When null, the rule will be provisioned to all switches on the site."
-                },
-                "index": {
-                    "type": "integer",
-                    "description": "ACL rule index. This property is deprecated and has no effect. Use the dedicated ACL rule reordering endpoint."
-                },
-                "name": {
-                    "type": "string",
-                    "description": "ACL rule name"
-                },
-                "protocolFilter": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/types/unifi:sites/v1:ProtocolFilterItem"
-                    },
-                    "description": "Protocols this ACL rule will be applied to. When null, the rule will be applied to all protocols."
-                },
-                "siteId": {
-                    "type": "string",
-                    "description": "Overrides the provider-level site for this resource. Changing it moves the resource to another site (a replacement).",
-                    "replaceOnChanges": true
-                },
-                "sourceFilter": {
-                    "$ref": "#/types/unifi:sites/v1:IPACLRuleEndpoint",
-                    "description": "Traffic source filter"
-                },
-                "type": {
-                    "type": "string",
-                    "const": "IPV4",
-                    "default": "IPV4",
-                    "replaceOnChanges": true
-                }
-            },
-            "requiredInputs": [
-                "action",
-                "enabled",
-                "name"
-            ]
-        },
         "unifi:sites/v1:TrafficMatchIpv4Addresses": {
             "description": "An IPv4-addresses traffic-matching list on UniFi.",
             "properties": {
@@ -4816,7 +5027,8 @@
                 }
             },
             "requiredInputs": [
-                "name"
+                "name",
+                "items"
             ]
         },
         "unifi:sites/v1:TrafficMatchIpv6Addresses": {
@@ -4863,116 +5075,8 @@
                 }
             },
             "requiredInputs": [
-                "name"
-            ]
-        },
-        "unifi:sites/v1:TrafficMatchMac": {
-            "description": "A MAC-address traffic-matching ACL rule on UniFi.",
-            "properties": {
-                "action": {
-                    "$ref": "#/types/unifi:sites/v1:ACLRuleAction",
-                    "description": "ACL rule action"
-                },
-                "description": {
-                    "type": "string",
-                    "description": "ACL rule description"
-                },
-                "destinationFilter": {
-                    "$ref": "pulumi.json#/Any",
-                    "description": "Traffic destination filter"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "enforcingDeviceFilter": {
-                    "$ref": "#/types/unifi:sites/v1:ACLRuleDeviceFilter",
-                    "description": "IDs of the Switch-capable devices used to enforce the ACL rule. When null, the rule will be provisioned to all switches on the site."
-                },
-                "index": {
-                    "type": "integer",
-                    "description": "ACL rule index. Lower index has higher priority"
-                },
-                "metadata": {
-                    "$ref": "#/types/unifi:sites/v1:UserDefinedOrDerivedEntityMetadata",
-                    "description": "Only user-defined rules can be deleted or modified"
-                },
-                "name": {
-                    "type": "string",
-                    "description": "ACL rule name"
-                },
-                "networkIdFilter": {
-                    "type": "string",
-                    "description": "Network ID to which this ACL rule applies"
-                },
-                "sourceFilter": {
-                    "$ref": "pulumi.json#/Any",
-                    "description": "Traffic source filter"
-                },
-                "type": {
-                    "type": "string"
-                }
-            },
-            "type": "object",
-            "required": [
-                "action",
-                "enabled",
-                "index",
-                "metadata",
                 "name",
-                "networkIdFilter"
-            ],
-            "inputProperties": {
-                "action": {
-                    "$ref": "#/types/unifi:sites/v1:ACLRuleAction",
-                    "description": "ACL rule action"
-                },
-                "description": {
-                    "type": "string",
-                    "description": "ACL rule description"
-                },
-                "destinationFilter": {
-                    "$ref": "#/types/unifi:sites/v1:MACACLRuleEndpoint",
-                    "description": "Traffic destination filter"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "enforcingDeviceFilter": {
-                    "$ref": "#/types/unifi:sites/v1:ACLRuleDeviceFilter",
-                    "description": "IDs of the Switch-capable devices used to enforce the ACL rule. When null, the rule will be provisioned to all switches on the site."
-                },
-                "index": {
-                    "type": "integer",
-                    "description": "ACL rule index. This property is deprecated and has no effect. Use the dedicated ACL rule reordering endpoint."
-                },
-                "name": {
-                    "type": "string",
-                    "description": "ACL rule name"
-                },
-                "networkIdFilter": {
-                    "type": "string",
-                    "description": "Network ID to which this ACL rule applies"
-                },
-                "siteId": {
-                    "type": "string",
-                    "description": "Overrides the provider-level site for this resource. Changing it moves the resource to another site (a replacement).",
-                    "replaceOnChanges": true
-                },
-                "sourceFilter": {
-                    "$ref": "#/types/unifi:sites/v1:MACACLRuleEndpoint",
-                    "description": "Traffic source filter"
-                },
-                "type": {
-                    "type": "string",
-                    "const": "MAC",
-                    "default": "MAC",
-                    "replaceOnChanges": true
-                }
-            },
-            "requiredInputs": [
-                "action",
-                "enabled",
-                "name"
+                "items"
             ]
         },
         "unifi:sites/v1:TrafficMatchPorts": {
@@ -5019,7 +5123,8 @@
                 }
             },
             "requiredInputs": [
-                "name"
+                "name",
+                "items"
             ]
         },
         "unifi:sites/v1:WifiBroadcastIotOptimized": {
@@ -5405,7 +5510,11 @@
                 "multicastToUnicastConversionEnabled",
                 "name",
                 "securityConfiguration",
-                "uapsdEnabled"
+                "uapsdEnabled",
+                "advertiseDeviceName",
+                "arpProxyEnabled",
+                "broadcastingFrequenciesGHz",
+                "bssTransitionEnabled"
             ]
         }
     },

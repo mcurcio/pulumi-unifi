@@ -22,7 +22,9 @@ import (
 	pulumirpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 
 	fwCallback "github.com/cloudy-sky-software/pulumi-provider-framework/callback"
+	fwOpenAPI "github.com/cloudy-sky-software/pulumi-provider-framework/openapi"
 	fwRest "github.com/cloudy-sky-software/pulumi-provider-framework/rest"
+	"github.com/getkin/kin-openapi/openapi3"
 
 	openapigen "github.com/cloudy-sky-software/pulschema/pkg"
 )
@@ -51,6 +53,10 @@ type unifiProvider struct {
 	// metadata is the same crudMap/name-map bundle the framework runs on,
 	// stashed so OnPostInvoke can resolve a token's read path for pagination.
 	metadata openapigen.ProviderMetadata
+
+	// doc is the generated OpenAPI doc the framework runs on, parsed once more
+	// so OnDiff can resolve a discriminated body's variant schemas.
+	doc *openapi3.T
 }
 
 func makeProvider(host *provider.HostClient, name, version string, pulumiSchemaBytes, openapiDocBytes, metadataBytes []byte) (pulumirpc.ResourceProviderServer, error) {
@@ -65,6 +71,7 @@ func makeProvider(host *provider.HostClient, name, version string, pulumiSchemaB
 	if err := json.Unmarshal(metadataBytes, &p.metadata); err != nil {
 		return nil, fmt.Errorf("unmarshaling provider metadata: %w", err)
 	}
+	p.doc = fwOpenAPI.GetOpenAPISpec(openapiDocBytes)
 
 	// p is itself the framework callback; pass it in, then capture the returned
 	// handle on the struct so the hooks can reach the live HTTP client.

@@ -16,13 +16,31 @@ WORKING_DIR  := $(shell pwd)
 # bump touches only pin.env.
 include openapi/pin.env
 SPEC         := openapi/unifi-network-$(SPEC_VERSION).json
+# The pinned UniFi OS Server installer (uos/pin.env): the private-API model
+# source. It is fetched into a cache OUTSIDE the repo, never committed.
+include uos/pin.env
+UOS_CACHE    ?= $(if $(UNIFI_UOS_CACHE),$(UNIFI_UOS_CACHE),$(HOME)/.cache/pulumi-unifi/uos)
+UOS_INSTALLER_FILE := $(UOS_CACHE)/$(UOS_SHA256)/installer
+UOS_MODEL    := build/uos/model.json
+UOS_SRC      := $(wildcard provider/pkg/uos/*.go provider/pkg/kind/*.go provider/cmd/pulumi-gen-unifi/*.go)
 GEN_DIR      := provider/cmd/pulumi-resource-$(PACK)
 SCHEMA_FILE  := $(GEN_DIR)/schema.json
+# The private-API switch (docs/design/private-binding.md §4). PRIVATE=0 (the
+# default, and CI): schema.merged.json is the schema.json golden byte for byte
+# and surface.json serves no private kinds (only the official engine-served
+# ones), so every existing gate sees no change.
+# PRIVATE=1: generate_schema needs build/uos/model.json (the pinned installer)
+# and merges the private kinds (unifi:network:*) into the merged schema, the
+# plugin and the SDK. The merged schema and surface.json are gitignored.
+PRIVATE      ?= 0
+MERGED_SCHEMA := $(GEN_DIR)/schema.merged.json
+PRIVATE_MODEL_DEP := $(if $(filter 1,$(PRIVATE)),$(UOS_MODEL),)
+PRIVATE_MODEL_ARG := $(if $(filter 1,$(PRIVATE)),-model $(UOS_MODEL),)
 BIN          := $(WORKING_DIR)/bin
 
 LDFLAGS      := -ldflags "-X $(VERSION_PATH)=$(VERSION)"
 
-.PHONY: ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
+.PHONY: uos-fetch uos-model private-check uos-parity test-e2e-private test-e2e-edge test-live ensure fetch gen generate_schema python_sdk generate schema schema-check schema-delta schema-compare lint-schema build install test test-mock test-sdk e2e-bootstrap test-e2e docs-gen docs docs-serve clean
 
 DOCSVENV     := $(WORKING_DIR)/.docsvenv
 
@@ -47,15 +65,19 @@ fetch::
 gen::
 	cd provider && go build $(LDFLAGS) -o $(BIN)/$(CODEGEN) ./cmd/pulumi-gen-$(PACK)
 
-# Run the code generator: spec -> schema.json + metadata.json + openapi_generated.yml.
-generate_schema:: gen $(SPEC)
+# Run the code generator: spec -> schema.json + metadata.json + openapi_generated.yml,
+# then the private merge -> schema.merged.json + surface.json (with PRIVATE=0,
+# a byte copy of the golden and only the official engine-served kinds).
+generate_schema:: gen $(SPEC) $(PRIVATE_MODEL_DEP)
 	$(BIN)/$(CODEGEN) -spec=$(SPEC) -out=$(GEN_DIR) -version=$(VERSION) schema
+	$(BIN)/$(CODEGEN) private $(PRIVATE_MODEL_ARG) -golden $(SCHEMA_FILE) -out $(GEN_DIR)
 
-# Generate the Python SDK from the freshly generated schema. gen-sdk appends a
-# language-named subdirectory, so --out=sdk yields sdk/python.
+# Generate the Python SDK from the freshly generated merged schema (the golden
+# at PRIVATE=0). gen-sdk appends a language-named subdirectory, so --out=sdk
+# yields sdk/python.
 python_sdk:: generate_schema
 	rm -rf sdk/python
-	pulumi package gen-sdk --language python --out sdk $(SCHEMA_FILE)
+	pulumi package gen-sdk --language python --out sdk $(MERGED_SCHEMA)
 
 # Deterministic umbrella: fetch + regenerate every build artifact from the pinned spec.
 generate:: python_sdk
@@ -132,12 +154,12 @@ test-mock:: build
 	echo "waiting for the mock to serve through TLS (Prism boot lags container state)..."; \
 	ready=; \
 	for i in $$(seq 1 60); do \
-		code=$$(curl -sk -o /dev/null -w '%{http_code}' --max-time 2 https://127.0.0.1:8443/proxy/network/integration/v1/sites/default/wifi/broadcasts || echo 000); \
+		code=$$(curl -sk -o /dev/null -w '%{http_code}' --max-time 2 https://127.0.0.1:8443/proxy/network/integration/v1/sites/default/wifi/broadcasts || true); \
 		case "$$code" in 000|502|503|504) sleep 0.5 ;; *) echo "mock ready (HTTP $$code, attempt $$i)"; ready=1; break ;; esac; \
 	done; \
 	[ -n "$$ready" ] || { echo "ERROR: mock not ready on https://127.0.0.1:8443 (last HTTP $$code)"; exit 1; }; \
 	UNIFI_MOCK_ADDR=127.0.0.1:8443 \
-		go -C provider test -tags integration -count=1 -run 'TestReadPathAgainstMock|TestWritePathAgainstMock' ./pkg/provider/
+		go -C provider test -tags integration -count=1 -run 'TestReadPathAgainstMock|TestWritePathAgainstMock|TestACLRuleWritesAgainstMock|TestOrderingAgainstMock' ./pkg/provider/ ./pkg/dispatch/
 
 # Python SDK smoke test: regenerate the SDK, install it (+ pulumi + pytest) into
 # a throwaway venv, and assert pulumi_unifi imports with its stable class set
@@ -148,6 +170,7 @@ test-sdk:: python_sdk
 	$(WORKING_DIR)/.sdkvenv/bin/pip install -q --upgrade pip
 	$(WORKING_DIR)/.sdkvenv/bin/pip install -q pytest pulumi ./sdk/python
 	$(WORKING_DIR)/.sdkvenv/bin/python -m pytest test/sdk/test_smoke.py -q
+	UNIFI_REQUIRE_PRIVATE_SDK=$(PRIVATE) $(WORKING_DIR)/.sdkvenv/bin/python -m pytest test/sdk/test_private_smoke.py -q
 
 # Tier-2 ONE-TIME seed bake. Boots a blank heavy UniFi OS Server stack (the only
 # image that authenticates the Integration API), pauses for the maintainer to
@@ -167,6 +190,72 @@ e2e-bootstrap::
 # Docker + git-lfs (the seed is an LFS object); see test/e2e/README.md.
 test-e2e:: build
 	./test/e2e/run.sh
+
+# The private-API kinds through the AUTHENTICATED edge on the same seeded,
+# wizard-completed controller (docs/design/private-binding.md §S2.10): the
+# PRIVATE=1 plugin + SDK, the test/e2e-private driver in edge mode, the seed's
+# key (read from test/e2e/seed.env into the environment only). Needs the pinned
+# installer (UOS_INSTALLER=<path>) and PULUMI=<the 3.230.0 CLI>. Leaves the
+# PRIVATE=1 artifacts built, like test-e2e-private.
+test-e2e-edge:: build
+	E2E_DRIVERS=edge ./test/e2e/run.sh
+
+# One boot of the seeded controller for every live driver: the gRPC tests, the
+# CLI driver (PRIVATE=0), then the edge driver (PRIVATE=1).
+test-live:: build
+	E2E_DRIVERS="grpc cli edge" ./test/e2e/run.sh
+
+# --- Private API: the model extractor (docs/design/private-binding.md) -------
+# None of these run in stock CI (an 875 MB download). They never write
+# Ubiquiti files into the repo: the installer lives in $(UOS_CACHE), the model
+# in the gitignored build/uos/.
+
+# Get the pinned installer into the cache (verifies size + pinned SHA-256).
+# UOS_INSTALLER=<path> reuses a local copy instead of downloading.
+uos-fetch::
+	./uos/fetch.sh
+
+$(UOS_INSTALLER_FILE):
+	./uos/fetch.sh
+
+# Extract the canonical Kind model from the installer (streamed in memory,
+# nothing executed). Rebuilt only when the pins or the extractor change.
+$(UOS_MODEL): uos/pin.env openapi/pin.env $(UOS_SRC) | $(UOS_INSTALLER_FILE)
+	$(MAKE) gen
+	$(BIN)/$(CODEGEN) uos-extract -installer $(UOS_INSTALLER_FILE) -pin uos/pin.env -spec-pin openapi/pin.env -out $@
+
+uos-model:: $(UOS_MODEL)
+
+# HARD private-model gate (needs the installer): the generated private surface
+# (schema.merged.json + surface.json digests, tokens.txt, the private surface
+# lint); model digest vs
+# provider/pkg/private/testdata/digests.txt, canonical form, the pin ties
+# (Network version == SPEC_VERSION; the installer's integration.json SHA-256
+# == SPEC_SHA256), kinds.yaml resolving against the model, the slice kinds'
+# facts, and determinism (extract twice -> identical bytes). A skipped test is
+# a failure here (UNIFI_REQUIRE_UOS_MODEL=1). After a reviewed model change:
+# UPDATE_GOLDEN=1 make private-check.
+private-check:: $(UOS_MODEL)
+	cd provider && UNIFI_REQUIRE_UOS_MODEL=1 UNIFI_UOS_MODEL=$(WORKING_DIR)/$(UOS_MODEL) \
+		UNIFI_UOS_INSTALLER=$(UOS_INSTALLER_FILE) go test -count=1 -v -run 'TestPrivate' ./pkg/private/ ./pkg/private/gen/
+
+# Differential oracle: the Go extractor vs the research prototype
+# (tools/uos-extract) and vs the official spec shipped in the same image (the
+# prototype's bar: 73/73 routes, 157/161 request fields, 154/157 required).
+# Pass the prototype's outputs to compare against them too:
+#   UOS_ORACLE_ROUTES=<routes.tsv> UOS_ORACLE_CRUD=<crud.json> make uos-parity
+uos-parity:: $(UOS_INSTALLER_FILE)
+	cd provider && UOS_INSTALLER=$(UOS_INSTALLER_FILE) go test -tags uosoracle -count=1 -v -run 'TestParity' ./pkg/uos/
+
+# Private-API live e2e (OFFLINE / local — needs a privileged Docker and the
+# pinned installer; NOT stock CI). test/e2e-private/run.sh builds the PRIVATE=1
+# plugin + Python SDK, boots UniFi OS Server from the SAME pinned installer's
+# image (no wizard, no key), and drives the Pulumi CLI through create, read,
+# no-op, update, drift, import and destroy for the 4 private kinds. Set
+# PULUMI=<cli> for the pinned CLI and UOS_INSTALLER=<path> to reuse a local
+# installer. See test/e2e-private/README.md.
+test-e2e-private::
+	./test/e2e-private/run.sh
 
 # --- Documentation (MkDocs Material + mike) ---------------------------------
 # The docs are fully isolated from the Go build and the SDK venv: an auto-

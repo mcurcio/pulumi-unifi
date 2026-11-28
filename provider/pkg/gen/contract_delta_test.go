@@ -19,7 +19,7 @@ import (
 // TestSchemaMatchesGolden already guarantees committed == regenerated, so parsing
 // the committed file is equivalent and avoids a pipeline run) and detects the
 // token-INVARIANT breaking classes marked ★ in §4.1: an added required input, a
-// removed output property, a type narrowing (string→enum, enum value removal,
+// removed input property, a removed output property, a type narrowing (string→enum, enum value removal,
 // array→scalar), an added replaceOnChanges, or a removed secret. Token
 // add/remove/rename are already caught by the byte golden + tokens.txt and are
 // deliberately NOT re-detected here.
@@ -94,10 +94,27 @@ func detectBreakingDelta(base, cur pschema.PackageSpec) []breakingItem {
 	var items []breakingItem
 
 	// --- Resources ---------------------------------------------------------
+	// A base token that is gone from cur but aliased by a cur resource was
+	// renamed (mappings.yaml aliases:): state migrates to the new token, so the
+	// new token must still not break what the old one accepted. Compare the
+	// pair under the new token's name. A removal with no alias stays with the
+	// byte golden and tokens.txt.
+	aliasedBy := map[string]string{}
+	for tok, cres := range cur.Resources {
+		for _, a := range cres.Aliases {
+			if a.Type != "" {
+				aliasedBy[a.Type] = tok
+			}
+		}
+	}
 	for tok, bres := range base.Resources {
 		cres, ok := cur.Resources[tok]
 		if !ok {
-			continue // token removal: caught by the byte golden / tokens.txt
+			renamed, aliased := aliasedBy[tok]
+			if !aliased {
+				continue // token removal: caught by the byte golden / tokens.txt
+			}
+			tok, cres = renamed, cur.Resources[renamed]
 		}
 
 		// (a) added required input: any name required in cur that was not
@@ -114,6 +131,14 @@ func detectBreakingDelta(base, cur pschema.PackageSpec) []breakingItem {
 		for name := range bres.Properties {
 			if _, present := cres.Properties[name]; !present {
 				items = append(items, breakingItem{"removed-output", tok + "." + name})
+			}
+		}
+
+		// (f) removed input property: a program that sets it no longer
+		// compiles (or fails Check), e.g. an outputOnly: entry.
+		for name := range bres.InputProperties {
+			if _, present := cres.InputProperties[name]; !present {
+				items = append(items, breakingItem{"removed-input", tok + "." + name})
 			}
 		}
 
@@ -134,6 +159,11 @@ func detectBreakingDelta(base, cur pschema.PackageSpec) []breakingItem {
 			for _, name := range cfn.Inputs.Required {
 				if !baseReq[name] {
 					items = append(items, breakingItem{"added-required-input", tok + " input." + name})
+				}
+			}
+			for name := range bfn.Inputs.Properties {
+				if _, present := cfn.Inputs.Properties[name]; !present {
+					items = append(items, breakingItem{"removed-input", tok + " input." + name})
 				}
 			}
 			items = append(items, comparePropMaps(base, cur, tok+" input", bfn.Inputs.Properties, cfn.Inputs.Properties)...)

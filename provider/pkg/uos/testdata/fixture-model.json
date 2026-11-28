@@ -1,0 +1,515 @@
+{
+  "kinds": [
+    {
+      "api": "classic",
+      "collection": "rest/setting/mgmt",
+      "envelope": "meta-data",
+      "fields": {
+        "hostname": {
+          "secret": true,
+          "source": "fields",
+          "type": "string",
+          "wireName": "hostname"
+        },
+        "led_enabled": {
+          "source": "fields",
+          "type": "bool",
+          "wireName": "led_enabled"
+        },
+        "x_ssh_password": {
+          "pattern": ".*",
+          "secret": true,
+          "source": "fields",
+          "type": "string",
+          "wireName": "x_ssh_password"
+        }
+      },
+      "idField": "_id",
+      "itemGet": false,
+      "itemPath": "rest/setting/mgmt/{id}",
+      "listGet": false,
+      "name": "Setting.mgmt",
+      "verbs": ""
+    },
+    {
+      "api": "classic",
+      "collection": "rest/setting/ntp",
+      "envelope": "meta-data",
+      "fields": {
+        "ntp_server_1": {
+          "source": "fields",
+          "type": "string",
+          "wireName": "ntp_server_1"
+        }
+      },
+      "idField": "_id",
+      "itemGet": false,
+      "itemPath": "rest/setting/ntp/{id}",
+      "listGet": false,
+      "name": "Setting.ntp",
+      "verbs": ""
+    },
+    {
+      "api": "classic",
+      "collection": "rest/thing",
+      "envelope": "meta-data",
+      "fields": {
+        "enabled": {
+          "source": "fields",
+          "type": "bool",
+          "wireName": "enabled"
+        },
+        "list": {
+          "items": {
+            "pattern": "^[a-f0-9]{24}$",
+            "source": "fields",
+            "type": "string"
+          },
+          "source": "fields",
+          "type": "array",
+          "wireName": "list"
+        },
+        "mode": {
+          "enum": [
+            "auto",
+            "manual",
+            "off"
+          ],
+          "source": "fields",
+          "type": "enum",
+          "wireName": "mode"
+        },
+        "name": {
+          "pattern": ".{1,32}",
+          "secret": true,
+          "source": "fields",
+          "type": "string",
+          "wireName": "name"
+        },
+        "nested": {
+          "fields": {
+            "inner": {
+              "enum": [
+                "a",
+                "b"
+              ],
+              "source": "fields",
+              "type": "enum",
+              "wireName": "inner"
+            }
+          },
+          "source": "fields",
+          "type": "object",
+          "wireName": "nested"
+        },
+        "port": {
+          "pattern": "[0-9]{1,5}",
+          "source": "fields",
+          "type": "int",
+          "wireName": "port"
+        },
+        "x_passphrase": {
+          "secret": true,
+          "source": "fields",
+          "type": "string",
+          "wireName": "x_passphrase"
+        }
+      },
+      "idField": "_id",
+      "itemGet": false,
+      "itemPath": "rest/thing/{id}",
+      "listGet": false,
+      "name": "Thing",
+      "verbs": ""
+    },
+    {
+      "api": "v2",
+      "collection": "gadgets",
+      "createList": true,
+      "createPath": "gadgets",
+      "envelope": "bare",
+      "fields": {
+        "_id": {
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "_id"
+        },
+        "name": {
+          "constraints": {
+            "nonEmpty": true
+          },
+          "required": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "name"
+        }
+      },
+      "idField": "_id",
+      "itemGet": false,
+      "itemPath": "gadgets/{id}",
+      "listGet": true,
+      "name": "gadgets",
+      "verbs": "CRUD"
+    },
+    {
+      "api": "v2",
+      "collection": "members",
+      "createPath": "members",
+      "envelope": "bare",
+      "fields": {
+        "id": {
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "id"
+        },
+        "members": {
+          "constraints": {
+            "size": {
+              "min": 1
+            }
+          },
+          "items": {
+            "source": "bytecode",
+            "type": "string"
+          },
+          "source": "bytecode",
+          "type": "array",
+          "wireName": "members"
+        },
+        "name": {
+          "constraints": {
+            "len": {
+              "max": 100
+            }
+          },
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "name"
+        },
+        "pskValue": {
+          "secret": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "pskValue"
+        }
+      },
+      "idField": "id",
+      "itemGet": true,
+      "itemPath": "members/{id}",
+      "listGet": false,
+      "name": "members",
+      "verbs": "CRU-"
+    },
+    {
+      "api": "v2",
+      "collection": "things",
+      "createPath": "things/create",
+      "envelope": "bare",
+      "fields": {
+        "_id": {
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "_id"
+        },
+        "name": {
+          "constraints": {
+            "nonEmpty": true
+          },
+          "required": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "name"
+        }
+      },
+      "idField": "_id",
+      "itemGet": false,
+      "itemPath": "things/{thingId}",
+      "listGet": true,
+      "name": "things",
+      "verbs": "CR-D"
+    },
+    {
+      "api": "v2",
+      "collection": "widgets",
+      "createPath": "widgets",
+      "envelope": "bare",
+      "fields": {
+        "_id": {
+          "readOnly": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "_id"
+        },
+        "big": {
+          "default": 1000,
+          "source": "bytecode",
+          "type": "int",
+          "wireName": "big"
+        },
+        "code": {
+          "pattern": "^[a-z]+$",
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "code"
+        },
+        "color": {
+          "enum": [
+            "red",
+            "green",
+            "BLUE"
+          ],
+          "source": "bytecode",
+          "type": "enum",
+          "wireName": "color"
+        },
+        "computed": {
+          "defaultComputed": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "computed"
+        },
+        "count": {
+          "constraints": {
+            "max": 100,
+            "min": 0
+          },
+          "default": 5,
+          "source": "bytecode",
+          "type": "int",
+          "wireName": "count"
+        },
+        "created": {
+          "readOnly": true,
+          "source": "bytecode",
+          "type": "datetime",
+          "wireName": "created"
+        },
+        "enabled": {
+          "default": true,
+          "source": "bytecode",
+          "type": "bool",
+          "wireName": "enabled"
+        },
+        "huge": {
+          "default": 100000,
+          "source": "bytecode",
+          "type": "int",
+          "wireName": "huge"
+        },
+        "label": {
+          "default": "abc",
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "label"
+        },
+        "limits": {
+          "source": "bytecode",
+          "type": "map",
+          "values": {
+            "source": "bytecode",
+            "type": "int"
+          },
+          "wireName": "limits"
+        },
+        "matrix": {
+          "items": {
+            "items": {
+              "source": "bytecode",
+              "type": "int"
+            },
+            "source": "bytecode",
+            "type": "array"
+          },
+          "source": "bytecode",
+          "type": "array",
+          "wireName": "matrix"
+        },
+        "mode": {
+          "default": "fast",
+          "enum": [
+            "fast",
+            "slow"
+          ],
+          "source": "bytecode",
+          "type": "enum",
+          "wireName": "mode"
+        },
+        "mode2": {
+          "default": "slow",
+          "enum": [
+            "fast",
+            "slow"
+          ],
+          "source": "bytecode",
+          "type": "enum",
+          "wireName": "mode2"
+        },
+        "name": {
+          "constraints": {
+            "nonEmpty": true,
+            "size": {
+              "max": 64,
+              "min": 1
+            }
+          },
+          "required": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "name"
+        },
+        "note": {
+          "optional": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "note"
+        },
+        "pass": {
+          "secret": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "pass",
+          "writeOnly": true
+        },
+        "plain": {
+          "enum": [
+            "ALPHA",
+            "BETA"
+          ],
+          "source": "bytecode",
+          "type": "enum",
+          "wireName": "plain"
+        },
+        "ratio": {
+          "default": 0.5,
+          "source": "bytecode",
+          "type": "number",
+          "wireName": "ratio"
+        },
+        "ref": {
+          "source": "bytecode",
+          "type": "uuid",
+          "wireName": "ref"
+        },
+        "rq": {
+          "required": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "rq"
+        },
+        "schedule": {
+          "fields": {
+            "allDay": {
+              "source": "bytecode",
+              "type": "bool",
+              "wireName": "allDay"
+            },
+            "base_field": {
+              "source": "bytecode",
+              "type": "string",
+              "wireName": "base_field"
+            },
+            "mode": {
+              "enum": [
+                "fast",
+                "slow"
+              ],
+              "required": true,
+              "source": "bytecode",
+              "type": "enum",
+              "wireName": "mode"
+            },
+            "next_run": {
+              "readOnly": true,
+              "source": "bytecode",
+              "type": "date",
+              "wireName": "next_run"
+            }
+          },
+          "required": true,
+          "source": "bytecode",
+          "type": "object",
+          "wireName": "schedule"
+        },
+        "sw": {
+          "required": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "sw"
+        },
+        "tags": {
+          "constraints": {
+            "custom": [
+              "must be a valid MAC"
+            ]
+          },
+          "default": [],
+          "items": {
+            "source": "bytecode",
+            "type": "string"
+          },
+          "source": "bytecode",
+          "type": "array",
+          "wireName": "tags"
+        },
+        "target": {
+          "fields": {
+            "matching_target": {
+              "enum": [
+                "ANY",
+                "NETWORK"
+              ],
+              "required": true,
+              "source": "bytecode",
+              "type": "enum",
+              "wireName": "matching_target"
+            }
+          },
+          "polymorph": {
+            "prop": "matching_target",
+            "variants": {
+              "ANY": {},
+              "NETWORK": {
+                "network_ids": {
+                  "items": {
+                    "source": "bytecode",
+                    "type": "string"
+                  },
+                  "source": "bytecode",
+                  "type": "array",
+                  "wireName": "network_ids"
+                }
+              }
+            }
+          },
+          "source": "bytecode",
+          "type": "object",
+          "wireName": "target"
+        },
+        "when": {
+          "source": "bytecode",
+          "type": "datetime",
+          "wireName": "when"
+        },
+        "x_secret": {
+          "secret": true,
+          "source": "bytecode",
+          "type": "string",
+          "wireName": "x_secret"
+        }
+      },
+      "idField": "_id",
+      "itemGet": true,
+      "itemPath": "widgets/{id}",
+      "listGet": true,
+      "name": "widgets",
+      "verbs": "CRUD"
+    }
+  ],
+  "source": {
+    "extractorVersion": "1",
+    "installerSha256": "<synthetic>",
+    "integrationSha256": "db01c2b160fec2c4b5f17bf22b999c6eb3e737e8da9a756aa5ecd9df97e4c4c9",
+    "networkVersion": "9.9.9",
+    "uosVersion": "7.7.7"
+  }
+}

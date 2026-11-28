@@ -61,6 +61,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: provider/go.sum
       - uses: pulumi/actions@v6
+        with:
+          # Pinned to provider/go.mod's pulumi/pkg version: newer CLIs (seen on 3.278.0)
+          # reject the spec's digit-only property names (e.g. `24`) in gen-sdk.
+          pulumi-version: 3.230.0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
@@ -82,6 +86,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: provider/go.sum
       - uses: pulumi/actions@v6
+        with:
+          # Pinned to provider/go.mod's pulumi/pkg version: newer CLIs (seen on 3.278.0)
+          # reject the spec's digit-only property names (e.g. `24`) in gen-sdk.
+          pulumi-version: 3.230.0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"

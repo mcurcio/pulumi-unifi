@@ -247,14 +247,23 @@ make schema-compare                  [ADVISORY — primarily a CI entrypoint]
 ```
 
 Rationale for the `make schema` / `make schema-check` split: the committed
-`schema.json` is *also* the `//go:embed` input for the provider binary
-(`cmd/pulumi-resource-unifi/main.go:15`), so `make generate_schema` (which `make
+`schema.json` is *also* a `//go:embed` input for the provider binary
+(`cmd/pulumi-resource-unifi/main.go`; the framework runs on it), so `make generate_schema` (which `make
 build` already runs) must remain its canonical writer. `schema-check` is
 therefore a **pure read-only** verifier — CI must fail on drift, never silently
 rebase. The asymmetry (schema/metadata owned by the entrypoint; tokens.txt owned
 by the test's `UPDATE_GOLDEN`) is forced by `go:embed` and is documented, not
 hidden. Critically, `schema-check` runs against `./pkg/gen/` alone so it is
 immune to the cmd-package embed compile problem (§3.5).
+
+*Update (private-API binding):* the plugin now embeds five generated files: the
+three above plus the gitignored `schema.merged.json` and `surface.json` (named
+`private.json` before slice 2 step 2), and
+GetSchema serves `schema.merged.json`. At `PRIVATE=0` (the default and every CI
+job) it is byte-equal to this golden, guarded by `TestNoModelIsGolden`, so the
+frozen contract is unchanged. A `PRIVATE=1` build's extra `unifi:network:*`
+surface is a local, unpublished build and sits **outside** this contract; see
+[private-binding.md](private-binding.md) §5 and §9.
 
 ### 3.2 Shared serializer + byte-exact golden tests
 
@@ -396,8 +405,10 @@ an in-process pipeline guard; the golden linter does not re-implement it.
 1. **The `test` job is already RED on `main`.** It runs `go vet ./...` then
    `make test` (`cd provider && go test ./...`). Both compile
    `cmd/pulumi-resource-unifi`, which `//go:embed`s `schema.json`,
-   `metadata.json`, **and** `openapi_generated.yml` (`main.go:15,18,21`) — all
-   three gitignored. In a fresh checkout none exist, so `./...` fails to compile
+   `metadata.json`, **and** `openapi_generated.yml` — all
+   three gitignored (since the private-API binding it also embeds
+   `schema.merged.json` and `surface.json`, which `make generate_schema` writes
+   too; see §3.1). In a fresh checkout none exist, so `./...` fails to compile
    before any test runs. **Prep fix:** run `make generate_schema` (which builds
    the gen binary and writes all three embeds) **before** `go vet`/`make test`.
    This design fixes the pre-existing breakage as a side effect; it is carved out
@@ -523,6 +534,8 @@ enforces because `tokens.txt` is blind to them):
 - ★ Adding a **new required input** to an existing resource/function (growth of
   `requiredInputs`), or making an existing optional input required.
 - ★ **Removing an output property** from an existing resource/function.
+- ★ **Removing an input property** from an existing resource/function (for example
+  making it output only): every program that sets it breaks.
 - ★ **Type narrowing** of an existing property (`string` → enum; enum **value
   removal**; array → scalar).
 - ★ **`replaceOnChanges` add** on an existing property (silently converts an

@@ -52,7 +52,7 @@ func TestReplaceOnChangesMarksDiscriminator(t *testing.T) {
 		"unifi:sites/v1:ManagedNetworkGateway":     "management",
 		"unifi:sites/v1:ManagedNetworkSwitch":      "management",
 		"unifi:sites/v1:ManagedNetworkUnmanaged":   "management",
-		"unifi:sites/v1:TrafficMatchMac":           "type",
+		"unifi:sites/v1:AclRuleMac":                "type",
 		"unifi:sites/v1:TrafficMatchPorts":         "type",
 	}
 	for tok, prop := range discProp {

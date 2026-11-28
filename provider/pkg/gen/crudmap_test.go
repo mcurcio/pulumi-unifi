@@ -97,9 +97,25 @@ func deref(s *string) string {
 // framework cannot dispatch it. The strict forward direction (every crudMap
 // *key* is a live token) is TestCRUDMapKeysAreLiveTokens, green since B1's
 // orphan pruning landed.
+//
+// Resources served outside the framework (mappings.yaml `singletons:`, served by
+// the engine through the official binding) are the one exception, and they must
+// have NO crudMap entry: the framework must never dispatch them.
 func TestCRUDMapCoversAllTokens(t *testing.T) {
 	pkg, meta := runPipelineTyped(t)
+	outside := singletonTokens()
+	for tok := range outside {
+		if _, ok := pkg.Resources[tok]; !ok {
+			t.Errorf("singleton %q is not a live resource token", tok)
+		}
+		if _, ok := meta.ResourceCRUDMap[tok]; ok {
+			t.Errorf("singleton %q has a crudMap entry; it is served outside the framework", tok)
+		}
+	}
 	for tok := range pkg.Resources {
+		if outside[tok] {
+			continue
+		}
 		if _, ok := meta.ResourceCRUDMap[tok]; !ok {
 			t.Errorf("resource token %q has no crudMap entry — framework cannot dispatch it", tok)
 		}
@@ -136,7 +152,11 @@ func TestCRUDMapKeysAreLiveTokens(t *testing.T) {
 // missing verbs from the shared item path, so every resource now binds R + D.
 func TestResourceCRUDBindsItemLevel(t *testing.T) {
 	pkg, meta := runPipelineTyped(t)
+	outside := singletonTokens() // served by the engine, not the framework
 	for tok := range pkg.Resources {
+		if outside[tok] {
+			continue
+		}
 		m := meta.ResourceCRUDMap[tok]
 		if m == nil {
 			t.Errorf("resource %q has no crudMap entry", tok)
@@ -193,8 +213,8 @@ func TestDiscriminatedResourcesHaveFullCRUD(t *testing.T) {
 		"unifi:sites/v1:ManagedNetworkGateway", "unifi:sites/v1:ManagedNetworkSwitch", "unifi:sites/v1:ManagedNetworkUnmanaged", // networks
 		"unifi:sites/v1:DnsARecord", "unifi:sites/v1:DnsAaaaRecord", "unifi:sites/v1:DnsCnameRecord",
 		"unifi:sites/v1:DnsMxRecord", "unifi:sites/v1:DnsSrvRecord", "unifi:sites/v1:DnsTxtRecord",
-		"unifi:sites/v1:DnsForwardDomain",                                   // dns/policies
-		"unifi:sites/v1:TrafficMatchIpv4", "unifi:sites/v1:TrafficMatchMac", // acl-rules
+		"unifi:sites/v1:DnsForwardDomain",                         // dns/policies
+		"unifi:sites/v1:AclRuleIpv4", "unifi:sites/v1:AclRuleMac", // acl-rules
 		"unifi:sites/v1:TrafficMatchIpv4Addresses", "unifi:sites/v1:TrafficMatchIpv6Addresses", "unifi:sites/v1:TrafficMatchPorts", // traffic-matching-lists
 	}
 

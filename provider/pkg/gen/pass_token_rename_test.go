@@ -134,7 +134,7 @@ func TestTokenRenameNoCollisionsOnPipeline(t *testing.T) {
 		"unifi:sites/v1:WifiBroadcastIotOptimized",
 		"unifi:sites/v1:ManagedNetworkGateway",
 		"unifi:sites/v1:TrafficMatchIpv4Addresses",
-		"unifi:sites/v1:TrafficMatchMac",
+		"unifi:sites/v1:AclRuleMac",
 	}
 	for _, w := range want {
 		if _, ok := pkg.Resources[w]; !ok {

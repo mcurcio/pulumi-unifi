@@ -7,6 +7,18 @@
 // embeds: schema.json, metadata.json, openapi_generated.yml.
 //
 // Usage: pulumi-gen-unifi [-spec PATH] [-out DIR] [-version V] schema
+//
+//	pulumi-gen-unifi uos-extract -installer F -pin uos/pin.env [-spec-pin openapi/pin.env] -out build/uos/model.json
+//
+//	pulumi-gen-unifi private [-model build/uos/model.json] [-overrides kinds.yaml] -golden schema.json -out DIR
+//
+// private merges the private kinds (docs/design/private-binding.md §5) into
+// schema.merged.json and writes the engine's surface.json; without -model the
+// merged schema is the golden byte for byte.
+//
+// uos-extract reads the pinned UniFi OS Server installer (never executing it)
+// into the private Kind model (docs/design/private-binding.md §3). The model
+// is a gitignored build artifact.
 package main
 
 import (
@@ -35,6 +47,20 @@ const (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "private" {
+		if err := privateGen(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "private: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "uos-extract" {
+		if err := uosExtract(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "uos-extract: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	flag.Usage = func() {
 		_, err := fmt.Fprint(flag.CommandLine.Output(), "Usage: pulumi-gen-unifi [flags] <language>\n")
 		contract.IgnoreError(err)

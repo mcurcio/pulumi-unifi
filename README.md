@@ -33,8 +33,12 @@ beezly OpenAPI spec ─▶ FixOpenAPIDoc ─▶ pulschema ─▶ Pulumi schema +
 
 ## Scope
 
-- **Official API only.** Targets Ubiquiti's documented Network Integration API with `X-API-KEY`
-  auth — not the legacy private controller API.
+- **Official API by default.** Targets Ubiquiti's documented Network Integration API with `X-API-KEY`
+  auth. An **opt-in private-API binding** (`unifi:network:*` kinds over the controller's own
+  `/api/s/...` and `/v2/api/...` routes) is built locally with `PRIVATE=1` from the pinned UniFi OS
+  Server installer and is **not published**; see
+  [docs/design/private-binding.md](docs/design/private-binding.md). The default build (`PRIVATE=0`)
+  is byte-identical to the official-only provider.
 - **Self-scoping to write coverage.** The official API is partially writable today (Ubiquiti is
   rolling write endpoints out through 2026). The provider classifies each spec entity by the verbs
   the pinned spec exposes: entities with create/update/delete become managed **resources**, GET-only
@@ -58,8 +62,15 @@ official API, released with a `PluginDownloadURL` and a published Python SDK. Wh
 - **List reads auto-aggregate pages** (`OnPostInvoke` follows `offset`/`limit` to completion, since
   the framework issues only one GET) and **`allowInsecure`** swaps in a verification-skipping
   transport for self-signed controllers.
-- Two-tier test harness: a no-Docker unit gate (`make test`) and a Prism-TLS-mock read + write-dispatch
-  test (`make test-mock`).
+- Test harness: a no-Docker unit gate (`make test`), a Prism-TLS-mock read + write-dispatch
+  test (`make test-mock`), the Tier-2 live controller tier (`make test-e2e`) and the private-API tier
+  (`make test-e2e-private`).
+- **Private-API binding (opt-in, local, `PRIVATE=1`).** A Go extractor reads the pinned UniFi OS
+  Server installer into a gitignored kind model; the generator merges the private kinds into a
+  gitignored `schema.merged.json`, and an engine in `provider/pkg/private` serves them. Proven end to
+  end by `make test-e2e-private` (Pulumi CLI create/read/update/drift/import/destroy against a real
+  controller booted from the same installer). See
+  [docs/design/private-binding.md](docs/design/private-binding.md).
 
 **Proven (Tier-1):** against a **spec-driven Prism mock** over real TLS — URL composition, response
 decode, and `{siteId}` substitution for both a no-`siteId` and a site-scoped data source; create →
@@ -102,11 +113,16 @@ docs/
   DESIGN.md        # technical design: toolchain, pipeline, grouping, auth, distribution
   BUILD-PLAN.md    # phased build sequence + verification checklist
 openapi/           # pin manifest (SOURCE + fetch.sh); the spec itself is fetched at build (gitignored)
-provider/          # Go module: plugin binary, codegen entrypoint, pkg/{gen,provider,version}
+provider/          # Go module: plugin binary, codegen entrypoint,
+                   #   pkg/{gen,provider,version} (official API)
+                   #   pkg/{uos,kind,private} (private API: installer extractor, kind model, engine)
+uos/               # private-API installer pin (pin.env + fetch.sh); the installer is fetched (gitignored)
+tools/uos-extract/ # research prototype of the private-API extractor (the parity oracle)
 sdk/python/        # generated Python SDK (pulumi_unifi) — build artifact, gitignored
 test/
   mock/            # Tier-1: Prism mock + TLS front (make test-mock)
   e2e/             # Tier-2: UniFi OS Server, seed-restore harness (make e2e-bootstrap / test-e2e)
+  e2e-private/     # private-API tier: installer-booted controller + Pulumi CLI (make test-e2e-private)
 ```
 
 The Tier-2 e2e seed (`test/e2e/unifi-seed.tgz`) is a **git-lfs** object; run
