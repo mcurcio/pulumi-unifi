@@ -257,7 +257,8 @@ hidden. Critically, `schema-check` runs against `./pkg/gen/` alone so it is
 immune to the cmd-package embed compile problem (§3.5).
 
 *Update (private-API binding):* the plugin now embeds five generated files: the
-three above plus the gitignored `schema.merged.json` and `private.json`, and
+three above plus the gitignored `schema.merged.json` and `surface.json` (named
+`private.json` before slice 2 step 2), and
 GetSchema serves `schema.merged.json`. At `PRIVATE=0` (the default and every CI
 job) it is byte-equal to this golden, guarded by `TestNoModelIsGolden`, so the
 frozen contract is unchanged. A `PRIVATE=1` build's extra `unifi:network:*`
@@ -406,7 +407,7 @@ an in-process pipeline guard; the golden linter does not re-implement it.
    `cmd/pulumi-resource-unifi`, which `//go:embed`s `schema.json`,
    `metadata.json`, **and** `openapi_generated.yml` — all
    three gitignored (since the private-API binding it also embeds
-   `schema.merged.json` and `private.json`, which `make generate_schema` writes
+   `schema.merged.json` and `surface.json`, which `make generate_schema` writes
    too; see §3.1). In a fresh checkout none exist, so `./...` fails to compile
    before any test runs. **Prep fix:** run `make generate_schema` (which builds
    the gen binary and writes all three embeds) **before** `go vet`/`make test`.

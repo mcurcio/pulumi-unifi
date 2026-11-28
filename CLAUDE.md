@@ -13,8 +13,11 @@ proven live: `make test-e2e` runs a real authenticated Create→Read→Diff→Up
 (`DnsARecord`) + a live data-source read against a **real UniFi OS Server** restored from a committed
 seed. **Key finding:** the Integration API is UniFi-OS-coupled — the standalone Network app refuses it
 (403, mode-refusal), so the live tier MUST use the heavy `hieutq/unifi-os-server` image and is
-therefore an **offline/local tier, not stock CI** (see `test/e2e/README.md`). Remaining: Phase 5
-(release) and CI for Tier-1 only. Read [docs/DESIGN.md](docs/DESIGN.md) for architecture,
+therefore an **offline/local tier, not stock CI** (see `test/e2e/README.md`). The private-API
+binding's slice 2 is built through §S2.12 step 6b, including the step-2 layer move (one engine, per-API
+bindings, `surface.json`; docs/design/private-binding.md §S2.14 row 40); step 6c (serving IPv6 ACL
+rules) waits for a Network version that accepts them. Remaining: Phase 5 (release) and CI for Tier-1
+only. Read [docs/DESIGN.md](docs/DESIGN.md) for architecture,
 [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for the sequence. All work happens in this repo; **do not
 modify the separate `iac` repo** — consuming the SDK there is a later, separate effort.
 
@@ -46,10 +49,10 @@ beezly spec (pinned SHA, fetched at build by openapi/fetch.sh — gitignored)
 `openapi_generated.yml`, and `sdk/python/` are all build artifacts (gitignored). `make build` and
 `make test` fetch + regenerate them on demand; the plugin `//go:embed`s five generated files at
 compile time: `schema.json`, `metadata.json`, `openapi_generated.yml` (the framework's inputs) plus
-`schema.merged.json` (what GetSchema serves) and `private.json` (the engine's surface: the private kinds
-plus the official engine-served singletons). At `PRIVATE=0` `schema.merged.json` is byte-equal to the
-golden (`TestNoModelIsGolden`) and `private.json` holds no private kinds, only the official singletons
-(today `unifi:sites/v1:AclRuleOrdering`). Only source is tracked: the pin manifest (`openapi/SOURCE` + `fetch.sh`), codegen Go,
+`schema.merged.json` (what GetSchema serves) and `surface.json` (the engine's surface: every
+engine-served kind, tagged with the API that serves it). At `PRIVATE=0` `schema.merged.json` is
+byte-equal to the golden (`TestNoModelIsGolden`) and `surface.json` holds no private kinds, only the
+official engine-served kinds (today `unifi:sites/v1:AclRuleOrdering`). Only source is tracked: the pin manifest (`openapi/SOURCE` + `fetch.sh`), codegen Go,
 provider glue, and `ExcludedPaths`/fixes.
 
 Toolchain roles:
@@ -164,7 +167,8 @@ Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
   `TrafficMatchIpv4`/`TrafficMatchMac`; `mappings.yaml` `aliases:` keeps the old tokens as type aliases so
   state migrates in place). `index` is output only (`outputOnly:`); the order is `AclRuleOrdering`, served
   by `provider/pkg/engine` through `provider/pkg/binding/official` over `provider/pkg/controller`, not by
-  the framework. A variant's own `required` list is lifted into `requiredInputs` (`pass_variant_required.go`).
+  the framework; in `surface.json` it is Kind data (`shape: singleton`, `keyedBySite`, a field with
+  `merge: leadingBlock`), never a name check. A variant's own `required` list is lifted into `requiredInputs` (`pass_variant_required.go`).
   See docs/design/private-binding.md Part 2.
 - **Private kinds at `PRIVATE=1` (slice 2):** 4 v2 kinds, the classic `UserGroup` and the settings
   singleton `SettingNtp` (`shape: singleton`). `AclRuleIpv6` (the G-Q4 variant exception: only
@@ -172,6 +176,13 @@ Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
   Network 10.4.57 and 10.5.67 both refuse IPv6 ACL rules, so `kinds.yaml` leaves `servedFrom` unset.
   `CheckTwinVariants` (in `make test`) fails once the official API serves IPV6 itself. Classic kinds
   need measured `verbs:`/`listPath:`/`itemGet:` entries (the model leaves them unknown).
+- **Layers (private-binding.md §S2.2):** `provider/pkg/dispatch` routes (a token in `surface.json` →
+  the engine; another `unifi:network:*` → refused; else → framework); `provider/pkg/engine` is the one
+  lifecycle for every engine-served kind and knows Kinds, not wire formats; `provider/pkg/binding/
+  {official,v2,classic}` know wire formats, not Pulumi; `provider/pkg/controller` is the one client (TLS
+  policy, `X-API-Key`, 429 retry). The stored-id prefix is `Binding.API()` (`private` for v2 and
+  classic, `official`), so `private:<id>` ids in state resolve unchanged. `TestLayerBoundaries` checks
+  the imports. `provider/pkg/private` keeps only the overrides, the private gen and the model checks.
 - **Determinism:** re-running `make generate` must produce no diff in `schema.json` / `metadata.json` /
   `sdk/`; keep `ensureSchemaTitles`.
 - Test write round-trips on a **throwaway test SSID** only; never commit a real `X-API-Key`.
