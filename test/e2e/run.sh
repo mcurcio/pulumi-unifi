@@ -165,7 +165,7 @@ fi
 # drivers above must not see.
 if has_driver edge; then
   echo "==> building the PRIVATE=1 plugin and Python SDK for the edge driver"
-  make -C "$ROOT" PRIVATE=1 build python_sdk
+  PATH="$(dirname "$PULUMI"):$PATH" make -C "$ROOT" PRIVATE=1 build python_sdk
   EVENV="$ROOT/build/e2e-private/venv"
   [ -x "$EVENV/bin/python" ] || python3 -m venv "$EVENV"
   "$EVENV/bin/pip" install --quiet --disable-pip-version-check "$ROOT/sdk/python"
