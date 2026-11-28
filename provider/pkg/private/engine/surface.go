@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	core "github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 )
 
 // TokenPrefix is the module every private token lives in (design §5).
@@ -22,6 +24,10 @@ type Surface struct {
 	// without a model).
 	Source SurfaceSource `json:"source"`
 	Kinds  []*Kind       `json:"kinds"`
+	// Singletons are the engine-served official singletons (mappings.yaml
+	// `singletons:`), present at PRIVATE=0 too. Slice 2 step 2 renames this
+	// file surface.json and folds them into Kinds (private-binding.md §S2.2).
+	Singletons []*core.Singleton `json:"singletons,omitempty"`
 }
 
 // SurfaceSource is the pin the surface was generated for.
@@ -120,7 +126,22 @@ func ParseSurface(b []byte) (*Surface, error) {
 		}
 		fillWire(k.Fields)
 	}
+	for _, sg := range s.Singletons {
+		if sg.Token == "" || sg.Path == "" || sg.Property == "" || sg.API != "official" || sg.Merge != core.MergeLeadingBlock {
+			return nil, fmt.Errorf("private.json: singleton %+v is incomplete or not an official leadingBlock singleton", *sg)
+		}
+	}
 	return s, nil
+}
+
+// FindSingleton returns the singleton with this token, or nil.
+func (s *Surface) FindSingleton(token string) *core.Singleton {
+	for _, sg := range s.Singletons {
+		if sg.Token == token {
+			return sg
+		}
+	}
+	return nil
 }
 
 func fillWire(fs map[string]*Field) {

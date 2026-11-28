@@ -17,6 +17,9 @@ import (
 	pulumirpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/binding/official"
+	"github.com/mcurcio/pulumi-unifi/provider/pkg/controller"
+	core "github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/binding"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private/engine"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/provider"
@@ -48,6 +51,10 @@ type Dispatcher struct {
 	client  *binding.Client
 	engine  *engine.Engine
 
+	// ordering serves the official singletons (surface.Singletons) through
+	// the official binding; its binding is built in Configure.
+	ordering *core.Ordering
+
 	// officialErr is set when the official side was not configured (no
 	// apiKey while private kinds are served); official calls return it.
 	officialErr error
@@ -62,10 +69,21 @@ func NewDispatcher(fw pulumirpc.ResourceProviderServer, name string, mergedSchem
 		return nil, err
 	}
 	c := &binding.Client{Site: "default", HTTP: &http.Client{Timeout: 60 * time.Second}}
-	return &Dispatcher{
+	d := &Dispatcher{
 		ResourceProviderServer: fw, name: name, schema: mergedSchema, surface: s,
 		client: c, engine: &engine.Engine{Surface: s, Binding: c},
-	}, nil
+	}
+	d.ordering = &core.Ordering{
+		Binding: official.New(controller.New(controller.Config{})),
+		Site:    func() string { return d.client.Site },
+		Warn:    func(msg string) { logging.Warningf("%s", msg) },
+	}
+	return d, nil
+}
+
+// singleton returns the official singleton the URN's type names, or nil.
+func (d *Dispatcher) singleton(urn string) *core.Singleton {
+	return d.surface.FindSingleton(string(resource.URN(urn).Type()))
 }
 
 // Surface returns the served private kinds.
@@ -156,6 +174,8 @@ func (d *Dispatcher) Configure(ctx context.Context, req *pulumirpc.ConfigureRequ
 		}
 	}
 	insecure, _ := strconv.ParseBool(get("allowInsecure"))
+	d.ordering.Binding = official.New(controller.New(controller.Config{
+		APIHost: get("apiHost"), APIKey: apiKey, AllowInsecure: insecure}))
 	d.client.BaseURL = strings.TrimRight(base, "/")
 	d.client.Site = site
 	d.client.APIKey = apiKey
@@ -209,6 +229,9 @@ func (d *Dispatcher) unknownKind(urn string) error {
 
 // Check validates a private resource's inputs.
 func (d *Dispatcher) Check(ctx context.Context, req *pulumirpc.CheckRequest) (*pulumirpc.CheckResponse, error) {
+	if sg := d.singleton(req.GetUrn()); sg != nil {
+		return d.checkSingleton(sg, req)
+	}
 	if !d.isPrivateToken(req.GetUrn()) {
 		if d.officialErr != nil {
 			return nil, d.officialErr
@@ -236,6 +259,9 @@ func (d *Dispatcher) Check(ctx context.Context, req *pulumirpc.CheckRequest) (*p
 
 // Diff compares managed paths.
 func (d *Dispatcher) Diff(ctx context.Context, req *pulumirpc.DiffRequest) (*pulumirpc.DiffResponse, error) {
+	if sg := d.singleton(req.GetUrn()); sg != nil {
+		return d.diffSingleton(sg, req)
+	}
 	if !d.isPrivateToken(req.GetUrn()) {
 		if d.officialErr != nil {
 			return nil, d.officialErr
@@ -290,6 +316,9 @@ func (d *Dispatcher) Diff(ctx context.Context, req *pulumirpc.DiffRequest) (*pul
 
 // Create creates a private object.
 func (d *Dispatcher) Create(ctx context.Context, req *pulumirpc.CreateRequest) (*pulumirpc.CreateResponse, error) {
+	if sg := d.singleton(req.GetUrn()); sg != nil {
+		return d.createSingleton(ctx, sg, req)
+	}
 	if !d.isPrivateToken(req.GetUrn()) {
 		if d.officialErr != nil {
 			return nil, d.officialErr
@@ -320,6 +349,9 @@ func (d *Dispatcher) Create(ctx context.Context, req *pulumirpc.CreateRequest) (
 
 // Read refreshes or imports a private object.
 func (d *Dispatcher) Read(ctx context.Context, req *pulumirpc.ReadRequest) (*pulumirpc.ReadResponse, error) {
+	if sg := d.singleton(req.GetUrn()); sg != nil {
+		return d.readSingleton(ctx, sg, req)
+	}
 	if !d.isPrivateToken(req.GetUrn()) {
 		if d.officialErr != nil {
 			return nil, d.officialErr
@@ -355,6 +387,9 @@ func (d *Dispatcher) Read(ctx context.Context, req *pulumirpc.ReadRequest) (*pul
 
 // Update merges the managed paths onto a fresh read and PUTs it.
 func (d *Dispatcher) Update(ctx context.Context, req *pulumirpc.UpdateRequest) (*pulumirpc.UpdateResponse, error) {
+	if sg := d.singleton(req.GetUrn()); sg != nil {
+		return d.updateSingleton(ctx, sg, req)
+	}
 	if !d.isPrivateToken(req.GetUrn()) {
 		if d.officialErr != nil {
 			return nil, d.officialErr
@@ -393,6 +428,10 @@ func (d *Dispatcher) Update(ctx context.Context, req *pulumirpc.UpdateRequest) (
 
 // Delete deletes a private object.
 func (d *Dispatcher) Delete(ctx context.Context, req *pulumirpc.DeleteRequest) (*pbempty.Empty, error) {
+	if sg := d.singleton(req.GetUrn()); sg != nil {
+		d.ordering.Delete(sg, req.GetId())
+		return &pbempty.Empty{}, nil
+	}
 	if !d.isPrivateToken(req.GetUrn()) {
 		if d.officialErr != nil {
 			return nil, d.officialErr

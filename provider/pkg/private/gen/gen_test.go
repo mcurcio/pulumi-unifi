@@ -118,6 +118,12 @@ func TestNoModelIsGolden(t *testing.T) {
 	if err != nil || len(s.Kinds) != 0 || len(out.Tokens) != 0 {
 		t.Fatalf("empty surface: %v %v", s, err)
 	}
+	// The engine-served official singletons are served at PRIVATE=0 too; the
+	// dispatcher test pins this exact entry (dispatch_singleton_test.go).
+	want := `{"api":"official","merge":"leadingBlock","path":"/v1/sites/{siteId}/acl-rules/ordering","property":"orderedAclRuleIds","token":"unifi:sites/v1:AclRuleOrdering"}`
+	if !strings.Contains(string(bytes.Join(bytes.Fields(out.Surface), nil)), want) {
+		t.Errorf("the PRIVATE=0 surface must serve AclRuleOrdering: %s", out.Surface)
+	}
 	if err := Lint(g, out.Schema, out.Surface); err != nil {
 		t.Fatal(err)
 	}

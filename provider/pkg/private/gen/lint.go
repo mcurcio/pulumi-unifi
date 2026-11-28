@@ -91,6 +91,11 @@ func Lint(golden, merged, surface []byte) error {
 			add("type %s is not unifi:network:<PascalCase>", tok)
 		}
 	}
+	for _, sg := range s.Singletons {
+		if _, ok := g.Resources[sg.Token]; !ok {
+			add("singleton %s: not a resource of the official golden", sg.Token)
+		}
+	}
 	if len(s.Kinds) > 0 {
 		if _, ok := m.Config.Variables[ConfigBaseURL]; !ok {
 			add("config %s is missing", ConfigBaseURL)

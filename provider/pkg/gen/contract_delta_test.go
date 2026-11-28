@@ -94,10 +94,27 @@ func detectBreakingDelta(base, cur pschema.PackageSpec) []breakingItem {
 	var items []breakingItem
 
 	// --- Resources ---------------------------------------------------------
+	// A base token that is gone from cur but aliased by a cur resource was
+	// renamed (mappings.yaml aliases:): state migrates to the new token, so the
+	// new token must still not break what the old one accepted. Compare the
+	// pair under the new token's name. A removal with no alias stays with the
+	// byte golden and tokens.txt.
+	aliasedBy := map[string]string{}
+	for tok, cres := range cur.Resources {
+		for _, a := range cres.Aliases {
+			if a.Type != "" {
+				aliasedBy[a.Type] = tok
+			}
+		}
+	}
 	for tok, bres := range base.Resources {
 		cres, ok := cur.Resources[tok]
 		if !ok {
-			continue // token removal: caught by the byte golden / tokens.txt
+			renamed, aliased := aliasedBy[tok]
+			if !aliased {
+				continue // token removal: caught by the byte golden / tokens.txt
+			}
+			tok, cres = renamed, cur.Resources[renamed]
 		}
 
 		// (a) added required input: any name required in cur that was not

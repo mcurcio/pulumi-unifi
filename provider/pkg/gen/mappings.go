@@ -3,6 +3,7 @@ package gen
 import (
 	_ "embed"
 	"fmt"
+	"sort"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -71,7 +72,33 @@ type mappingsFile struct {
 	Descriptions     descriptionMappings `yaml:"descriptions"`
 	Enums            enumMappings        `yaml:"enums"`
 	ImmutableFields  []string            `yaml:"immutableFields"`
+	// Aliases maps a live resource token to its former tokens (pass_aliases.go).
+	Aliases map[string][]string `yaml:"aliases"`
+	// OutputOnly lists "<token>.<property>" inputs kept only as outputs
+	// (pass_output_only.go).
+	OutputOnly []string `yaml:"outputOnly"`
+	// Singletons are the site-scoped documents the engine serves
+	// (pass_singletons.go).
+	Singletons []Singleton `yaml:"singletons"`
 }
+
+// Singleton is one mappings.yaml `singletons:` entry: a site-scoped document
+// managed as one resource per site, served by the engine through the official
+// binding rather than by the framework (docs/design/private-binding.md §S2.5).
+type Singleton struct {
+	// Path is the spec path (GET + PUT), e.g. /v1/sites/{siteId}/acl-rules/ordering.
+	Path string `yaml:"path" json:"path"`
+	// Token is the resource token the gen pass emits into the golden.
+	Token string `yaml:"token" json:"token"`
+	// Property is the managed list property of the PUT body (SDK name).
+	Property string `yaml:"property" json:"property"`
+	// Merge is how the managed list meets the live one; only leadingBlock today.
+	Merge string `yaml:"merge" json:"merge"`
+}
+
+// MergeLeadingBlock is the only singleton merge strategy: the managed ids form
+// the leading block of the live order, in the declared order.
+const MergeLeadingBlock = "leadingBlock"
 
 var (
 	loadedMappings   *mappingsFile
@@ -104,6 +131,32 @@ func (m *mappingsFile) validate() error {
 	}
 	if len(m.Resources.EntityPrefixes) == 0 {
 		return fmt.Errorf("resources.entityPrefixes is empty (mappings.yaml not loaded?)")
+	}
+	return m.validateSingletons()
+}
+
+// validateSingletons checks every singletons: entry: complete, a supported
+// merge, its path also excluded from pulschema, and no token listed twice.
+func (m *mappingsFile) validateSingletons() error {
+	excluded := map[string]bool{}
+	for _, p := range m.ExcludedPaths {
+		excluded[p] = true
+	}
+	seen := map[string]bool{}
+	for _, sg := range m.Singletons {
+		if sg.Path == "" || sg.Token == "" || sg.Property == "" {
+			return fmt.Errorf("singletons: entry %+v needs path, token and property", sg)
+		}
+		if sg.Merge != MergeLeadingBlock {
+			return fmt.Errorf("singletons: %s: merge %q is not supported (want %s)", sg.Token, sg.Merge, MergeLeadingBlock)
+		}
+		if !excluded[sg.Path] {
+			return fmt.Errorf("singletons: %s: path %s must also be in excludedPaths (the framework must not see it)", sg.Token, sg.Path)
+		}
+		if seen[sg.Token] {
+			return fmt.Errorf("singletons: token %s is listed twice", sg.Token)
+		}
+		seen[sg.Token] = true
 	}
 	return nil
 }
@@ -184,4 +237,33 @@ func enumCanonicalRename(defaultShort string) (string, bool) {
 // Callers must not mutate the returned slice.
 func immutableFieldPins() []string {
 	return loadMappings().ImmutableFields
+}
+
+// aliasPins returns the live-token -> former-tokens table (pass_aliases.go).
+func aliasPins() map[string][]string {
+	return loadMappings().Aliases
+}
+
+// outputOnlyPins returns the "<token>.<property>" inputs kept only as outputs
+// (pass_output_only.go). Callers must not mutate the returned slice.
+func outputOnlyPins() []string {
+	return loadMappings().OutputOnly
+}
+
+// Singletons returns the engine-served singleton entries, sorted by token. The
+// gen pass builds their schema; the private generator writes them into the
+// plugin's surface so the dispatcher can route them.
+func Singletons() []Singleton {
+	out := append([]Singleton(nil), loadMappings().Singletons...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Token < out[j].Token })
+	return out
+}
+
+// singletonTokens is the set of resource tokens served outside the framework.
+func singletonTokens() map[string]bool {
+	out := map[string]bool{}
+	for _, sg := range loadMappings().Singletons {
+		out[sg.Token] = true
+	}
+	return out
 }

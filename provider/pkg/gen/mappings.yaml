@@ -54,19 +54,21 @@ excludeResources:
 # oneOf+discriminator body into one resource per variant, naming each token
 # ToPascalCase(discriminatorValue) — bare, context-free (Standard, Mac, Gateway,
 # ARecord). The prefix restores entity context (WifiBroadcastStandard, DnsARecord,
-# ManagedNetworkGateway, TrafficMatchIpv4Addresses). Keyed by the spec collection
+# ManagedNetworkGateway, AclRuleIpv4, TrafficMatchIpv4Addresses). Keyed by the spec collection
 # path so it cannot silently bind to the wrong entity; the engine additionally
 # verifies the collection POST genuinely carries a discriminator before applying
 # (a stale/misapplied prefix is a loud error). These are entity-meaningful names
 # that path-segment derivation alone cannot produce (e.g. /networks →
-# ManagedNetwork not Network; /dns/policies → Dns not DnsPolicy; acl-rules and
-# traffic-matching-lists both → TrafficMatch).
+# ManagedNetwork not Network; /dns/policies → Dns not DnsPolicy; acl-rules →
+# AclRule, traffic-matching-lists → TrafficMatch). acl-rules was TrafficMatch
+# until slice 2 (docs/design/private-binding.md §S2.3); the old tokens are kept
+# as aliases (see aliases: below) so existing state migrates without a replace.
 resources:
   entityPrefixes:
     /v1/sites/{siteId}/dns/policies: Dns
     /v1/sites/{siteId}/wifi/broadcasts: WifiBroadcast
     /v1/sites/{siteId}/networks: ManagedNetwork
-    /v1/sites/{siteId}/acl-rules: TrafficMatch
+    /v1/sites/{siteId}/acl-rules: AclRule
     /v1/sites/{siteId}/traffic-matching-lists: TrafficMatch
 
 # functions holds the function-token normalization editorial layer. The engine
@@ -133,9 +135,13 @@ descriptions:
     ManagedNetworkGateway: A gateway-managed UniFi network (the gateway routes this network).
     ManagedNetworkSwitch: A switch-managed UniFi network (managed at the switch layer).
     ManagedNetworkUnmanaged: An unmanaged UniFi network (UniFi does not manage routing/switching).
-    # Traffic-match variants (collection summaries "Create ACL Rule" / "Create Traffic Matching List").
-    TrafficMatchMac: A MAC-address traffic-matching ACL rule on UniFi.
-    TrafficMatchIpv4: An IPv4 traffic-matching ACL rule on UniFi.
+    # ACL rule variants (collection summary "Create ACL Rule"). The rule's position
+    # (first match wins) is owned by AclRuleOrdering, not by the rule.
+    AclRuleMac: A MAC-address ACL rule on UniFi. Its position in the site's rule order is set with AclRuleOrdering.
+    AclRuleIpv4: An IPv4 ACL rule on UniFi. Its position in the site's rule order is set with AclRuleOrdering.
+    # The ACL rule ordering singleton (singletons: below).
+    AclRuleOrdering: "The order of a site's ACL rules (first match wins). The listed rules form the leading block of the order, in the declared order; rules the program does not list follow in their current relative order (unlisted: LAST) or fail the update (unlisted: REJECT). Destroying it leaves the order as it is."
+    # Traffic-matching-list variants (collection summary "Create Traffic Matching List").
     TrafficMatchIpv4Addresses: An IPv4-addresses traffic-matching list on UniFi.
     TrafficMatchIpv6Addresses: An IPv6-addresses traffic-matching list on UniFi.
     TrafficMatchPorts: A ports traffic-matching list on UniFi.
@@ -188,3 +194,34 @@ immutableFields:
   # in the new site. Present on every resource (the {siteId} path param), so this
   # pin marks them all replaceOnChanges.
   - siteId
+
+# aliases maps a live resource token to the former tokens of the same resource
+# (pass_aliases.go). They are emitted as ResourceSpec.aliases into the golden, so
+# the SDK's generated opts carry `Alias(type_=<old>)` and the Pulumi engine
+# renames existing state in place (no create, no delete). Loud errors: the key is
+# not a live resource; an alias is itself a live token; two tokens share an alias.
+aliases:
+  unifi:sites/v1:AclRuleIpv4: [unifi:sites/v1:TrafficMatchIpv4]
+  unifi:sites/v1:AclRuleMac: [unifi:sites/v1:TrafficMatchMac]
+
+# outputOnly lists `<token>.<property>` resource inputs that are dropped from the
+# inputs but kept as outputs (pass_output_only.go). A dead entry (no such live
+# resource input) is a loud error. The ACL rule `index` is deprecated and has no
+# effect (the spec says so, and probe a3 measured it); the ordering PUT renumbers
+# it (probe a5), so it is read-only and the order is owned by AclRuleOrdering.
+outputOnly:
+  - unifi:sites/v1:AclRuleIpv4.index
+  - unifi:sites/v1:AclRuleMac.index
+
+# singletons are site-scoped documents the provider manages as one resource per
+# site, served by the engine (not the framework) through the official binding
+# (pass_singletons.go, docs/design/private-binding.md §S2.5). Each path must also
+# be in excludedPaths (pulschema would emit at most a data source for it), and
+# the token must not be in the framework CRUD map. The schema is built from the
+# path's own PUT body: `property` is the managed list; merge leadingBlock adds
+# the `unlisted` input and the `effectiveOrder` output.
+singletons:
+  - path: /v1/sites/{siteId}/acl-rules/ordering
+    token: unifi:sites/v1:AclRuleOrdering
+    property: orderedAclRuleIds
+    merge: leadingBlock

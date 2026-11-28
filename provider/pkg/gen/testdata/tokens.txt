@@ -48,6 +48,9 @@ function:unifi:sites/v1:listTrafficMatchingLists
 function:unifi:sites/v1:listVpnServers
 function:unifi:sites/v1:listWansOverviews
 function:unifi:sites/v1:listWifiBroadcasts
+resource:unifi:sites/v1:AclRuleIpv4
+resource:unifi:sites/v1:AclRuleMac
+resource:unifi:sites/v1:AclRuleOrdering
 resource:unifi:sites/v1:DnsARecord
 resource:unifi:sites/v1:DnsAaaaRecord
 resource:unifi:sites/v1:DnsCnameRecord
@@ -60,10 +63,8 @@ resource:unifi:sites/v1:FirewallZone
 resource:unifi:sites/v1:ManagedNetworkGateway
 resource:unifi:sites/v1:ManagedNetworkSwitch
 resource:unifi:sites/v1:ManagedNetworkUnmanaged
-resource:unifi:sites/v1:TrafficMatchIpv4
 resource:unifi:sites/v1:TrafficMatchIpv4Addresses
 resource:unifi:sites/v1:TrafficMatchIpv6Addresses
-resource:unifi:sites/v1:TrafficMatchMac
 resource:unifi:sites/v1:TrafficMatchPorts
 resource:unifi:sites/v1:WifiBroadcastIotOptimized
 resource:unifi:sites/v1:WifiBroadcastStandard

@@ -99,9 +99,19 @@ var passes = []pass{
 	// rename re-prefixes the tokens. It reads the spec discriminator mapping, not
 	// the token, but matches on the token short name, so order matters.
 	{name: "discriminator-inject", fn: discriminatorInjectPass},
+	// Restore the variant-level required inputs pulschema drops from an allOf
+	// variant (AclRuleMac.networkIdFilter, probe a2). Reads the discriminator the
+	// same way, so it runs while the token short names still invert pulschema's
+	// naming (before token-rename), and after discriminator-inject so the pinned
+	// discriminator is never lifted back into requiredInputs.
+	{name: "variant-required", fn: variantRequiredPass},
 	// Naming polish: entity-prefix the context-free variant tokens and normalize
 	// function names. Runs after the discriminator value is recovered.
 	{name: "token-rename", fn: tokenRenamePass},
+	// Former tokens of renamed resources become type aliases (state migrates in
+	// place). Runs right after the rename, so keys and the live-token checks see
+	// the final names.
+	{name: "aliases", fn: aliasesPass},
 	// Drop the action/batch RPC resources (Voucher/AdoptDevice) listed in
 	// mappings.yaml's excludeResources, in lockstep with their crudMap/autoNameMap
 	// entries — while preserving the data sources their shared endpoints serve
@@ -114,6 +124,14 @@ var passes = []pass{
 	// after token-rename (which deliberately leaves *Page tokens alone) so the
 	// list tokens are settled before descriptions annotates them.
 	{name: "depage", fn: depagePass},
+	// Inputs that have no effect and are owned elsewhere become output-only
+	// (the ACL rule index). Keyed by final token names.
+	{name: "output-only", fn: outputOnlyPass},
+	// Engine-served singletons (AclRuleOrdering) are built from their excluded
+	// path's PUT body. Runs before enum-cleanup (it adds an enum type) and before
+	// the annotation passes, so its siteId is described and marked replace like
+	// every resource's.
+	{name: "singletons", fn: singletonsPass},
 	// Type cleanup: dedup structurally-identical enums to one canonical type
 	// (rewriting refs in lockstep) and prune unreferenced empty types. Operates on
 	// the final Types graph, so it runs after the structural/naming passes that may

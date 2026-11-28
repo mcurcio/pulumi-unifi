@@ -153,12 +153,12 @@ test-mock:: build
 	echo "waiting for the mock to serve through TLS (Prism boot lags container state)..."; \
 	ready=; \
 	for i in $$(seq 1 60); do \
-		code=$$(curl -sk -o /dev/null -w '%{http_code}' --max-time 2 https://127.0.0.1:8443/proxy/network/integration/v1/sites/default/wifi/broadcasts || echo 000); \
+		code=$$(curl -sk -o /dev/null -w '%{http_code}' --max-time 2 https://127.0.0.1:8443/proxy/network/integration/v1/sites/default/wifi/broadcasts || true); \
 		case "$$code" in 000|502|503|504) sleep 0.5 ;; *) echo "mock ready (HTTP $$code, attempt $$i)"; ready=1; break ;; esac; \
 	done; \
 	[ -n "$$ready" ] || { echo "ERROR: mock not ready on https://127.0.0.1:8443 (last HTTP $$code)"; exit 1; }; \
 	UNIFI_MOCK_ADDR=127.0.0.1:8443 \
-		go -C provider test -tags integration -count=1 -run 'TestReadPathAgainstMock|TestWritePathAgainstMock' ./pkg/provider/
+		go -C provider test -tags integration -count=1 -run 'TestReadPathAgainstMock|TestWritePathAgainstMock|TestACLRuleWritesAgainstMock|TestOrderingAgainstMock' ./pkg/provider/ ./pkg/private/
 
 # Python SDK smoke test: regenerate the SDK, install it (+ pulumi + pytest) into
 # a throwaway venv, and assert pulumi_unifi imports with its stable class set

@@ -78,3 +78,34 @@ def test_top_level_country_data_source():
     """A no-siteId data source (countries) is also reachable."""
     countries = importlib.import_module("pulumi_unifi.countries.v1")
     assert hasattr(countries, "get_country")
+
+
+# Slice 2 (docs/design/private-binding.md §S2.3-§S2.5): the ACL rules carry
+# their entity name, the ordering singleton ships, and the former
+# TrafficMatchIpv4/TrafficMatchMac tokens survive only as aliases.
+ACL_RESOURCES = ["AclRuleIpv4", "AclRuleMac", "AclRuleOrdering"]
+
+
+@pytest.mark.parametrize("name", ACL_RESOURCES)
+def test_acl_resource_present(name):
+    import pulumi
+
+    sites = importlib.import_module("pulumi_unifi.sites.v1")
+    assert issubclass(getattr(sites, name), pulumi.CustomResource)
+
+
+@pytest.mark.parametrize("old", ["TrafficMatchIpv4", "TrafficMatchMac"])
+def test_renamed_acl_classes_are_gone(old):
+    sites = importlib.import_module("pulumi_unifi.sites.v1")
+    assert not hasattr(sites, old), f"{old} must be gone (renamed to AclRule*, kept only as an alias)"
+
+
+@pytest.mark.parametrize(
+    "module,old",
+    [("acl_rule_ipv4", "TrafficMatchIpv4"), ("acl_rule_mac", "TrafficMatchMac")],
+)
+def test_renamed_acl_classes_alias_the_old_token(module, old):
+    import inspect
+
+    src = inspect.getsource(importlib.import_module(f"pulumi_unifi.sites.v1.{module}"))
+    assert f'pulumi.Alias(type_="unifi:sites/v1:{old}")' in src

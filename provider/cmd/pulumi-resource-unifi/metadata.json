@@ -15,6 +15,18 @@
         "unifi:pending-devices/v1:listPendingDevices": {
             "r": "/v1/pending-devices"
         },
+        "unifi:sites/v1:AclRuleIpv4": {
+            "c": "/v1/sites/{siteId}/acl-rules",
+            "r": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
+            "d": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
+            "p": "/v1/sites/{siteId}/acl-rules/{aclRuleId}"
+        },
+        "unifi:sites/v1:AclRuleMac": {
+            "c": "/v1/sites/{siteId}/acl-rules",
+            "r": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
+            "d": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
+            "p": "/v1/sites/{siteId}/acl-rules/{aclRuleId}"
+        },
         "unifi:sites/v1:DnsARecord": {
             "c": "/v1/sites/{siteId}/dns/policies",
             "r": "/v1/sites/{siteId}/dns/policies/{dnsPolicyId}",
@@ -88,12 +100,6 @@
             "d": "/v1/sites/{siteId}/networks/{networkId}",
             "p": "/v1/sites/{siteId}/networks/{networkId}"
         },
-        "unifi:sites/v1:TrafficMatchIpv4": {
-            "c": "/v1/sites/{siteId}/acl-rules",
-            "r": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
-            "d": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
-            "p": "/v1/sites/{siteId}/acl-rules/{aclRuleId}"
-        },
         "unifi:sites/v1:TrafficMatchIpv4Addresses": {
             "c": "/v1/sites/{siteId}/traffic-matching-lists",
             "r": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}",
@@ -105,12 +111,6 @@
             "r": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}",
             "d": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}",
             "p": "/v1/sites/{siteId}/traffic-matching-lists/{trafficMatchingListId}"
-        },
-        "unifi:sites/v1:TrafficMatchMac": {
-            "c": "/v1/sites/{siteId}/acl-rules",
-            "r": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
-            "d": "/v1/sites/{siteId}/acl-rules/{aclRuleId}",
-            "p": "/v1/sites/{siteId}/acl-rules/{aclRuleId}"
         },
         "unifi:sites/v1:TrafficMatchPorts": {
             "c": "/v1/sites/{siteId}/traffic-matching-lists",

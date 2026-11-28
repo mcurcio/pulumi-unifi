@@ -19,6 +19,7 @@ import (
 
 	pschema "github.com/pulumi/pulumi/pkg/v3/codegen/schema"
 
+	core "github.com/mcurcio/pulumi-unifi/provider/pkg/engine"
 	officialgen "github.com/mcurcio/pulumi-unifi/provider/pkg/gen"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/kind"
 	"github.com/mcurcio/pulumi-unifi/provider/pkg/private"
@@ -45,10 +46,31 @@ type Output struct {
 	Tokens []string
 }
 
-// EmptySurface is private.json without a model.
+// EmptySurface is private.json without a model: no private kinds, only the
+// engine-served official singletons (mappings.yaml `singletons:`).
 func EmptySurface() []byte {
-	b, _ := kind.CanonicalJSON([]byte(`{"source":{},"kinds":[]}`))
+	b, err := marshalSurface(&engine.Surface{Kinds: []*engine.Kind{}, Singletons: singletons()})
+	if err != nil {
+		panic(err) // static data: a failure is a build defect
+	}
 	return b
+}
+
+// singletons lists the official singletons the engine serves, sorted by token.
+func singletons() []*core.Singleton {
+	var out []*core.Singleton
+	for _, sg := range officialgen.Singletons() {
+		out = append(out, &core.Singleton{Token: sg.Token, API: "official", Path: sg.Path, Property: sg.Property, Merge: sg.Merge})
+	}
+	return out
+}
+
+func marshalSurface(s *engine.Surface) ([]byte, error) {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return nil, err
+	}
+	return kind.CanonicalJSON(raw)
 }
 
 // Generate builds the outputs. A nil model returns the golden verbatim.
@@ -64,7 +86,8 @@ func Generate(m *kind.Model, o *private.Overrides, golden []byte) (*Output, erro
 		return nil, fmt.Errorf("parsing the golden schema: %w", err)
 	}
 	g := &generator{m: m, o: o, spec: &spec, types: map[string]pschema.ComplexTypeSpec{}}
-	surf := &engine.Surface{Source: engine.SurfaceSource{UOSVersion: m.Source.UOSVersion, NetworkVersion: m.Source.NetworkVersion}}
+	surf := &engine.Surface{Source: engine.SurfaceSource{UOSVersion: m.Source.UOSVersion, NetworkVersion: m.Source.NetworkVersion},
+		Singletons: singletons()}
 	exp := append([]private.Expose(nil), o.Expose...)
 	sort.Slice(exp, func(i, j int) bool { return exp[i].Token < exp[j].Token })
 	var errs []string
@@ -93,11 +116,7 @@ func Generate(m *kind.Model, o *private.Overrides, golden []byte) (*Output, erro
 	if err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(surf)
-	if err != nil {
-		return nil, err
-	}
-	pb, err := kind.CanonicalJSON(raw)
+	pb, err := marshalSurface(surf)
 	if err != nil {
 		return nil, err
 	}
