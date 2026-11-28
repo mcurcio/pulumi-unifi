@@ -205,3 +205,153 @@ python3 -I $X/check/roundtrip.py /tmp/uos-5.1.15/crud.json qos-rules,static-dns,
 
 The go-unifi comparison and the `api/fields` statistics used short one-off analyses that are not
 committed; everything else above comes from the committed scripts.
+
+## Slice 2 probe (authenticated edge, seeded controller)
+
+Measured 2026-11-28 with raw HTTP through the UniFi OS edge (`https://127.0.0.1:11443`) of the
+Tier-2 seed (`test/e2e/unifi-seed.tgz`, wizard completed, key minted) on the pinned Tier-2 image
+(UniFi OS 5.1.15, Network 10.4.57). Every request carried only `X-API-KEY` (read from
+`test/e2e/seed.env` at run time). All throwaway objects were deleted and the one settings change
+was restored. No provider code changed.
+
+### Boot recipe (what it took in a sandbox without IPv6)
+
+1. **Image.** `hieutq/unifi-os-server@sha256:3e8854769d63…` from Docker Hub answered 429; the same
+   digest came from `mirror.gcr.io/hieutq/unifi-os-server@<digest>` after several tries (the mirror
+   rate-limits per minute; already-pulled layers are kept between tries). Tagged locally as
+   `hieutq/unifi-os-server:pinned-3e8854769d63`. The image is the pinned digest, not a local rebuild.
+2. **Seed.** Untar into a fresh volume (as `restore.sh` does; `caddy:2` stood in for `alpine:3`,
+   which was not cached), deleting `postmaster.pid` and `mongod.lock`.
+3. **Privileges.** The compose `cap_add` list failed here (`CAP_SYS_RESOURCE` not available);
+   `privileged: true` with the same `cgroup: host`, tmpfs and volume mounts worked.
+4. **lanIp.** unifi-core reads the network interfaces from a discovery agent at
+   `discoveryClientUrl`, which the image sets to `http://host.docker.internal:11002` (env
+   `NODE_CONFIG`). On a real install the installer's host-side `discovery` binary serves it; the
+   in-container `uos-discovery-client` is a stub that exits. With no agent, unifi-core logs
+   "Can't find lanIp" every 3 s and never writes the `site-*` nginx configs, so nothing listens
+   on 443. Fix: map `host.docker.internal` to `127.0.0.1` in the container's `/etc/hosts` and run a
+   10-line node HTTP server on `127.0.0.1:11002` that answers any path with
+   `os.networkInterfaces()` as JSON (the shape unifi-core validates), then restart unifi-core.
+5. **No IPv6.** unifi-core writes `listen [::]:…` lines into `site-local-ip.conf` and
+   `site-supervisor.conf`; nginx then fails with `socket() [::]:443 … (97)`. Fix: a loop that
+   deletes those lines as they appear and runs `nginx -s reload`. **Never `systemctl restart
+   nginx`**: the unit's `ExecStartPre` (`stale-config-cleanup.conf`) runs
+   `rm -rf /data/unifi-core/config/http/*`, wiping every config unifi-core wrote, and unifi-core
+   does not rewrite them until its own restart. After one such restart a stale
+   `uos-internal.sock` blocked the reload (`bind() … Address already in use`); deleting the
+   socket file and reloading fixed it.
+6. **Ready.** About 14 minutes from `up` to the first authenticated 200 on `GET /v1/sites`,
+   most of it spent finding steps 4 and 5. A boot with both fixes applied from the start was
+   not timed.
+
+Steps 4 and 5 are sandbox workarounds, not product behaviour; they belong in the Tier-2 harness
+if it must run here. A host with IPv6 and the installer's own `discovery` agent needs neither.
+
+### a. Official ACL rules and ordering (`/proxy/network/integration/v1/sites/{siteId}/acl-rules`)
+
+| Question | Answer (evidence) |
+|---|---|
+| Site id | `GET /v1/sites` → 200, `totalCount` 1, `internalReference` `default`; the UUID equals the private site's `external_id` (`GET /api/self/sites`) |
+| Empty list / ordering | `GET acl-rules` → 200 `{offset,limit,count:0,totalCount:0,data:[]}`; `GET acl-rules/ordering` → 200 `{"orderedAclRuleIds":[]}` |
+| Create IPV4 | `POST {type:IPV4,name,enabled,action}` → **201**; response adds `id` (UUID), `index`, `metadata.origin: USER_DEFINED`. With `protocolFilter:["TCP"]` and `sourceFilter{type:IP_ADDRESSES_OR_SUBNETS,ipAddressesOrSubnets}` → 201, echoed |
+| Create MAC | without `networkIdFilter` → **400** `api.request.error` "networkIdFilter must not be null"; with the official network UUID → 201. The spec lists `networkIdFilter` as required on the MAC variant (inside `allOf`) but the generated `TrafficMatchMac.requiredInputs` is only `[action, enabled, name]`: the `allOf` requirement is lost in codegen |
+| Read one | `GET acl-rules/{id}` → 200; after delete → **404** `api.resource-not-found` |
+| Update | `PUT` is a **full replace**: a PUT without `sourceFilter`/`protocolFilter` → 200 and the filters are gone on re-read. A PUT without `type` → 400 `api.request.missing-type-id`. A PUT that changes `type` (MAC → IPV4) → **200, same id**: the variant can change in place |
+| Deprecated `index` | `PUT … index:0` on the third rule → 200, `index` stays 2: ignored, as documented |
+| Delete | → 200, empty body; again → 404 |
+| `index` on create | assigned densely in creation order (0, 1, 2) |
+| Ordering GET | `{"orderedAclRuleIds":[uuid…]}` in rule order (first match first) |
+| Ordering PUT, full permutation | → 200, echoes the new order; the per-rule `index` values follow it (0..n-1) |
+| Ordering PUT, subset | → **400** `api.acl-rule.ordering.not-all-acl-rules-specified` (also for `[]` when rules exist) |
+| Ordering PUT, unknown id | → **400** `api.request.invalid-reference` |
+| Ordering PUT, duplicate id | → **400** `api.acl-rule.ordering.duplicate-acl-rule-id` |
+
+So an ordering resource must send **every** user-defined rule on the site, including rules it does
+not manage (see d).
+
+### b. Private APIs through the edge with the key
+
+| Request | Answer |
+|---|---|
+| `GET /proxy/network/v2/api/site/default/acl-rules`, `qos-rules`, `apgroups` | 200, bare JSON arrays |
+| `GET /proxy/network/api/s/default/rest/usergroup`, `get/setting`, `stat/sysinfo`, `/api/self` | 200, `{meta:{rc:"ok"},data:[…]}`; `/api/self` shows the key acting as the owner admin (`is_owner`, `is_super`) |
+| v2 write: `POST apgroups {name,device_macs}` | **201**, response has `_id` and a server-minted `external_id` (UUID) |
+| v2 `PUT apgroups/{_id}` (full body) | 200 |
+| v2 `DELETE apgroups/{_id}` | **204** |
+| No key / wrong key on v2, classic and official paths | 401 `{"error":{"code":401,"message":"Unauthorized"}}` (edge) |
+| Session login / CSRF | **not needed**: key-only writes succeed on v2 and classic; the response sets no cookie and sends no `X-Csrf-Token` (the header is only listed in `access-control-expose-headers`) |
+| Site path segment | private paths take the site **name** (`default`); the site UUID in that position → 404 |
+| `:8081` inside the container after the wizard | `POST v2 acl-rules` unauthenticated → **401** (before the wizard it answered unauthenticated; the edge is now the only way in) |
+
+Frame tracer step 1 holds: one `apiKey`/`apiHost`/`allowInsecure` serves official and private
+writes. No login fallback is needed on this build.
+
+### c. Private IPv6 ACL rule (v2 `acl-rules`, `type: IPV6`)
+
+| Attempt | Answer |
+|---|---|
+| `POST {type:IPV6,name,action,enabled}` | 400 bean validation: `aclIndex`, `trafficSource`, `trafficDestination` must not be null (so `acl_index`, `traffic_source`, `traffic_destination` are required on create, as the model says) |
+| Same as an IPV4 control (`acl_index`, `ip_acl_protocol:ALL`, `specific_enforcers:[]`, both endpoints `type:NETWORK` with empty lists) | IPV4 → 201; **IPV6 → 500** HTML error page. server.log: `IPv6 ACL is not supported yet`, thrown from the switch-ACL service |
+| IPV6 with endpoints `type:IP_OR_SUBNET`, `ips_or_subnets:["2001:db8::/64"]` | 400: `ips_or_subnets` "must be valid IPv4 or Subnet" |
+| PUT an existing private IPV4 rule to `type:IPV6` | 500, same exception |
+| Read back / update / delete an IPv6 rule | **NOT RUN**: none can be created on Network 10.4.57 |
+
+**Finding: Network 10.4.57 accepts `IPV6` in the enum but refuses to create or convert to it.**
+The `IPV6` value in the private model is a placeholder, not a usable variant on the pinned
+version. Owner decision 3 (serve IPv6 ACL rules as a private kind) is blocked on the server, not on
+the edge: the kind would deserialize but every create would fail with a 500. The next pin
+(5.1.42 / Network 10.5.67) should be probed before building it.
+
+### d. Interplay (official ordering with rules the official API did not create)
+
+| Question | Answer |
+|---|---|
+| With an IPV6 rule present | **NOT RUN** (no IPV6 rule can exist, see c) |
+| Stand-in: a rule created through v2 (`type:IPV4`) | gets a server `external_id`; the official list shows it (`totalCount` +1, `origin: USER_DEFINED`) and official ordering GET lists it |
+| Official ordering PUT that omits the private-created rule | **400** `not-all-acl-rules-specified`: it fails, it does not drop or reorder around |
+| Official ordering PUT that includes it | 200; private `acl_index` becomes dense 0..n-1 in the given order |
+| Private create with an `acl_index` already taken | 201 and **no renumbering**: two rules share `acl_index` 0. The next official ordering GET lists both (ties in an order the API chose); an ordering PUT re-densifies |
+| Official DELETE of a private-created rule by its `external_id` | 200 |
+| v2 item GET `acl-rules/{_id}` | 405 (list + filter, as `kinds.yaml` already records) |
+| v2 PUT with only `name` | 400: v2 PUT needs the full body (`acl_index`, endpoints, …) |
+
+Consequence for the ordering resource: it must read the live set and send all ids. If an IPv6
+variant ever works and the official API cannot name it, an official ordering PUT would fail with
+`not-all-acl-rules-specified` while one exists; that case must be re-measured on the version that
+supports IPv6.
+
+### e. Id correspondence
+
+| Object | Official id | Private field |
+|---|---|---|
+| ACL rule | `id` (UUID) | **`external_id`** equals it, for rules created on either side; private `_id` is a Mongo ObjectId |
+| Site | `id` (UUID) | site `external_id`; private paths use the site `name` (= official `internalReference`) |
+| Network | `id` (UUID) | `networkconf.external_id`; but the private ACL field `mac_acl_network_id` holds the network's Mongo `_id`, not the UUID |
+| AP group (v2) | n/a | server mints `external_id` on create |
+| `acl_index` | `index` and the ordering position | same value, 0-based |
+
+### f. Classic writes (`/proxy/network/api/s/default/...`)
+
+| Request | Answer |
+|---|---|
+| `POST rest/usergroup {name,qos_rate_max_down,qos_rate_max_up}` | 200 (not 201), `{meta:{rc:"ok"},data:[{…,_id,site_id}]}` |
+| `GET rest/usergroup/{_id}` | 200, one-element `data` |
+| `GET rest/usergroup/{missing}` | **200 with `data:[]`**: not-found is an empty array, not a 404 |
+| `PUT rest/usergroup/{_id} {qos_rate_max_down}` | 200, **merge** (other fields kept) |
+| `POST` with a duplicate name | 200, a second object (no uniqueness) |
+| `POST` with a bad value | 400 `{meta:{rc:"error",msg:"api.err.InvalidPayload"},data:[{validationError:{field,pattern},rc:"error",msg:"api.err.InvalidValue"}]}` |
+| `DELETE rest/usergroup/{_id}` | 200 `{meta:{rc:"ok"},data:[]}`; again → 400 `api.err.IdInvalid` |
+| Settings list `GET get/setting` | 200, 37 sections, one document each, keyed by `key` |
+| Settings singleton chosen: `ntp` | `GET rest/setting/ntp` → 200; `PUT rest/setting/ntp/{_id}` with one field → 200, merge; `POST set/setting/ntp` with one field → 200, merge, same result; bad enum → 400 with `validationError{field,pattern}`; restored to the original values, verified by re-read |
+| Secrets in settings | the `mgmt` section returns `x_`-prefixed credential fields in plain text; a settings kind must mark `x_*` fields secret and never log them |
+
+### What this means for slice 2
+
+- (a) is ready to build: key-only private writes work through the edge on v2 and classic.
+- (b) the post-wizard controller closes the unauthenticated `:8081` path; the private e2e tier must
+  move to the edge with a key, which means the seeded controller (the Tier-2 seed already has one).
+- (c) classic needs its own read semantics (empty `data` = gone, merge PUT, 200 on create,
+  `rc:"error"` bodies) and settings singletons are addressed by `key` + `_id` (`ntp` works).
+- (d) the IPv6 ACL kind cannot be built on Network 10.4.57: the server refuses the variant.
+- The official ordering resource must own the complete rule list, and `TrafficMatchMac` (to be
+  `AclRuleMac`) needs `networkIdFilter` restored as required.
