@@ -75,8 +75,9 @@ low-quality spec consumable). Derived tokens are `sites/v1`-based, e.g. `unifi:s
 **Self-scoping to write coverage** — the provider does not hardcode a resource list. Each entity is
 classified by the verbs the pinned spec exposes: create/update/delete → managed **resource**; GET-only
 → **data source**. The official API is **partially writable** today (Ubiquiti ships writes through 2026);
-the pinned 10.4.57 spec yields **21 resources + 50 data sources**. Bumping the pinned spec auto-promotes
-data sources to resources as writes land. No per-resource hand-coding.
+the pinned 10.4.57 spec yields **21 framework resources + 50 data sources**, plus **1 engine-served
+singleton** (`AclRuleOrdering`, from `mappings.yaml` `singletons:`; 22 resources in the golden). Bumping
+the pinned spec auto-promotes data sources to resources as writes land. No per-resource hand-coding.
 
 ## Provider config
 
@@ -118,7 +119,10 @@ Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
   (a full `uos_data` volume snapshot — Mongo + Postgres-with-the-key-secret + configs, since `/data`
   symlinks into `/unifi`) into a real **UniFi OS Server** (`hieutq/unifi-os-server`, pinned by digest —
   the only image that authenticates the Integration API), JSON-gates readiness, then runs a real
-  authenticated CRUD round-trip + live read. The one-time bake (`make e2e-bootstrap`) needs a manual
+  authenticated CRUD round-trip + live read, then a Pulumi CLI driver (`test/e2e/cli`, PRIVATE=0 SDK,
+  pinned CLI 3.230.0 via `PULUMI=`) for the ACL rules, their ordering and the TrafficMatch* alias
+  migration. The boot recipe is `test/live/lib.sh`, with sandbox workarounds (privileged, a discovery
+  stub, IPv6 listen stripping) that `E2E_SANDBOX=auto` turns on only when the kernel has no IPv6. The one-time bake (`make e2e-bootstrap`) needs a manual
   first-run wizard + key mint (no headless API); thereafter every run is deterministic. See
   `test/e2e/README.md`.
 - **Private tier — `make test-e2e-private`** (privileged Docker + the pinned installer; OFFLINE/local):
@@ -141,8 +145,15 @@ Server** with a minted `X-API-Key` (Network app → Settings → Integrations).
   stubs that die on the next `pulumi up` (read endpoint unknown). `coalesceDiscriminatedCRUD`
   (`provider/pkg/gen/schema.go`, deterministic, analogous to `FixOpenAPIDoc`) fills the missing
   R/U/D/P from the shared item path (`P_coll + "/{param}"`; the discriminator rides in the request
-  body) and prunes orphan keys → all 21 resources round-trip full CRUD; `crudMap` keys = exactly the
-  live resource + function tokens. Long-term fix is upstream.
+  body) and prunes orphan keys → all 21 framework resources round-trip full CRUD; `crudMap` keys =
+  exactly the live resource + function tokens, minus the engine-served singletons (which have none).
+  Long-term fix is upstream.
+- **ACL rules (slice 2):** the official ACL rule variants are `AclRuleIpv4`/`AclRuleMac` (renamed from
+  `TrafficMatchIpv4`/`TrafficMatchMac`; `mappings.yaml` `aliases:` keeps the old tokens as type aliases so
+  state migrates in place). `index` is output only (`outputOnly:`); the order is `AclRuleOrdering`, served
+  by `provider/pkg/engine` through `provider/pkg/binding/official` over `provider/pkg/controller`, not by
+  the framework. A variant's own `required` list is lifted into `requiredInputs` (`pass_variant_required.go`).
+  See docs/design/private-binding.md Part 2.
 - **Determinism:** re-running `make generate` must produce no diff in `schema.json` / `metadata.json` /
   `sdk/`; keep `ensureSchemaTitles`.
 - Test write round-trips on a **throwaway test SSID** only; never commit a real `X-API-Key`.
