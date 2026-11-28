@@ -1,10 +1,13 @@
-# Private binding, slice 1: extractor, Kind model, codegen, engine, e2e
+# Private binding: slice 1 (extractor, Kind model, codegen, engine, e2e) and slice 2 (official ACL writes, authenticated edge)
 
-**Status:** decided design for the first private-API slice. It implements the agreed frame
-(`docs/design/private-api-provider-frame.md` on `docs/two-api-provider-frame`: one provider over two
-APIs, rules 1-3, G-Q1, natural keys, stored ids that name their API, whole-kind serving). The evidence
-is `docs/research/private-api-model-source.md`. **Where am I:** Module → Interfaces (this doc) →
-Implementation (next, on this branch).
+**Status:** Part 1 (§0-§14) is the decided and built design for the first private-API slice: built,
+measured and green (§14). Part 2 (§S2.0-§S2.14) is the **decided design for slice 2 and the official
+ACL rule writes**, from the owner's decisions of 2026-11-28 and the slice 2 probe; it is not built yet.
+Both implement the agreed frame (`docs/design/private-api-provider-frame.md` on
+`docs/two-api-provider-frame`: one provider over two APIs, rules 1-3, G-Q1, natural keys, stored ids
+that name their API, whole-kind serving, with the one variant exception of §S2.7). The evidence is
+`docs/research/private-api-model-source.md`. **Where am I:** slice 1 Implementation done; slice 2
+Module → Interfaces (Part 2) → Implementation (next, on this branch, in the steps of §S2.12).
 
 ## 0. How this was chosen
 
@@ -36,6 +39,9 @@ checks.
 | `make test-e2e-private`: the Pulumi CLI drives the Python SDK against a real UniFi OS Server 5.1.15, booted from the same pinned installer | Authenticated edge (`/proxy/network`) writes; post-wizard behaviour (the key-minted tier, slice 2) |
 | All existing gates unchanged and green; the committed `schema.json` golden is byte-identical | Data-source functions for private kinds (natural-key import covers lookup for now) |
 | | Publishing a private-capable SDK or plugin (Phase 5, an owner decision; see §9) |
+
+The slice-2 non-goals above (classic kinds, settings singletons, the authenticated edge, post-wizard
+behaviour) are now goals of Part 2; its own goals and non-goals are in §S2.1.
 
 ## 2. Components and file layout
 
@@ -311,3 +317,261 @@ import by natural key into a fresh stack with a no-op preview, and destroy with 
 | 32 | §11 step 7 (4): "`preview` shows exactly that diff" | `preview --refresh --json`: exactly one change, an `update` of that resource whose `detailedDiff` holds only that property. Then `up --refresh` restores it | A plain `preview` does not read the controller, so it cannot see the drift |
 | 33 | §11 step 7 (3) | The unmanaged fields changed by raw PUT are QosRule `enabled` and `download_burst` and FirewallAppBlock `client_macs`. The dropped fields are QosRule `destination.port_matching_type` (back to `ANY`, the model default) and `destination.port` (an `Optional`, cleared). Every kind changes a managed field. `kinds.yaml` `defaults:` stays empty: none was needed | These are the fields a fresh controller accepts without devices or set-up |
 | 34 | §11 step 7 (5): import one object | Three: ApGroup by bare key, NetworkMembersGroup by `name=…`, FirewallAppBlock with no `properties`. A missing key must fail with the zero-match error | Covers both key forms and the DiffLive path |
+
+# Part 2: Slice 2 and official ACL writes
+
+Scope is the owner's four decisions of 2026-11-28 plus slice 2 as the frame defines it:
+
+1. ACL rules are written through the **official** API (`/v1/sites/{siteId}/acl-rules`), proven live.
+2. An official **ACL rule ordering** resource on `GET/PUT /v1/sites/{siteId}/acl-rules/ordering`.
+   The per-rule `index` is deprecated and has no effect; first match wins, so order is part of the IaC
+   contract.
+3. **IPv6 ACL rules** as a private kind, the one documented exception to whole-kind serving (frame
+   G-Q4). The plan builds through slice 2, because IPv6 ACL rules are only useful once private writes
+   work through the authenticated edge.
+4. Rename `TrafficMatchIpv4`/`TrafficMatchMac` to `AclRuleIpv4`/`AclRuleMac`, with aliases so state
+   migrates without replace, acknowledged through the breaking-delta mechanism.
+
+Slice 2 proper: (a) private writes through the authenticated edge with the same `apiKey`/`apiHost`/
+`allowInsecure`; (b) post-wizard behaviour on the seeded, key-minted controller; (c) classic
+`/api/s/{site}/rest` kinds (first `usergroup`) and at least one settings singleton; (d) the IPv6 kind.
+
+Evidence: the "Slice 2 probe (authenticated edge, seeded controller)" section of
+`docs/research/private-api-model-source.md` (cited below as probe a1-f2).
+
+## S2.0 How this was chosen
+
+Two designs were scored 1 (poor) to 5 (strong).
+
+| Criterion | M: minimal risk (hand-written ordering handler, engine stays private) | D: domain layers (one engine, per-API bindings, singleton and variant as Kind facts) |
+|---|---|---|
+| Fit to the frame and owner decisions | 3: serves an IPv6 token whose every create fails on the pin; ordering bypasses "one engine, two bindings" | 4: frame step 4 one kind at a time; but its `relativeOrder` lets an unmanaged rule move ahead of managed ones with no drift, which misses decision 2 (first match wins) |
+| Layering and domain boundaries | 3: a second, ad-hoc lifecycle in `official/ordering`; the engine stays named "private" | 5: engine never sees HTTP or which API; singleton, variant and merge strategy are data; a shared controller-access layer |
+| Live testability | 4: one boot for both tiers; keeps the pre-wizard tier unchanged | 4: one shared harness; but it moves `test-e2e-private` onto the seed, losing the only seedless tier |
+| Determinism and CI risk | 4: small, local changes | 4: an engine move and a new surface file, both mechanical and gate-covered |
+| Licence safety | 5 | 5 |
+| **Total** | 19 | **22** |
+
+**Winner: D.** Grafted from M:
+- the ordering contract: the program's rules form the **leading block**, in declared order, and drift
+  is the live prefix differing from the input (§S2.5), replacing D's `relativeOrder`;
+- `test-e2e-private` stays exactly as it is (pre-wizard, `:8081`, no key) and the edge tier is
+  additive (§S2.10);
+- the discovery stub as the probe proved it: our own few lines of JavaScript run with the image's node
+  (§S2.10);
+- lazy site resolution, with no network call when the form given is the form needed (§S2.6);
+- `createDefaults:` for create-only fields the server requires (`acl_index`, probe c1) (§S2.7);
+- `mgmt` not exposed, plus a gen lint that an exposed classic `x_` field must be secret (§S2.8);
+- the "served outside the framework" set in `TestCRUDMapKeysAreLiveTokens`, read from `singletons:`;
+- the loud checks on aliases (§S2.4) and the variant read check over the unfiltered list (§S2.7);
+- a classic 5xx is surfaced as a short error with the server's message, not an HTML page.
+
+## S2.1 Goals and non-goals
+
+| Goals (slice 2) | Non-goals (deferred, with the step or slice that owns them) |
+|---|---|
+| `AclRuleIpv4`/`AclRuleMac` (renamed, aliased) proven live: create, no-op, update, delete, and state migration from the old tokens | Rebuilding the other 21 framework resources on the engine (frame step 4, one kind at a time after this) |
+| `unifi:sites/v1:AclRuleOrdering`, served by the engine through an official binding, at `PRIVATE=0` | `firewall/policies/ordering` (fits `singletons:` unchanged; its own PR) |
+| One engine and per-API bindings (`official`, `v2`, `classic`) over one controller-access layer | Per-field serving (Q4 B). Probe a3 shows the official ACL PUT replaces the whole rule, so B is unsafe there |
+| Private v2 and classic writes through the authenticated edge with the one `apiKey`; no login | A session login or CSRF handling (not needed, probe b4); an `Authenticator` is built only if a later pin refuses the key |
+| The 4 slice-1 kinds proven post-wizard on the seeded controller | Re-resolving stale ids across APIs; `mac:` ids (classic `user`) |
+| Classic `unifi:network:UserGroup` and the settings singleton `unifi:network:SettingNtp` | Settings sections with secrets (`mgmt`), other classic kinds (one per PR after this) |
+| `unifi:network:AclRuleIpv6` built and Tier-1 tested; served from the first Network version that accepts IPv6 ACL rules | Serving it on Network 10.4.57: the server refuses IPv6 ACL rules (probe c1) |
+| A version guard for private kinds (`stat/sysinfo` vs the pin) | Resetting settings on destroy (their defaults are not measured) |
+| All existing gates green, plus `make test-e2e` (live ACL and ordering) and a new `make test-e2e-edge` | Publishing a private-capable SDK or plugin (Phase 5, owner) |
+
+## S2.2 Layers and their boundaries
+
+```
+L5 Routing          provider/pkg/dispatch     token -> surface entry -> engine; everything else -> framework
+L4 Surface (data)   surface.json (generated)  the kinds the engine serves, each with api: official | v2 | classic
+L3 Engine (domain)  provider/pkg/engine       rules 1-3, G-Q1, natural key, stored id, singleton, variant;
+                    provider/pkg/kind         the Kind/Field model it executes (exists)
+L2 Bindings (wire)  provider/pkg/binding/{official,v2,classic}   paths, envelopes, status -> outcome
+L1 Controller       provider/pkg/controller   one HTTP client (TLS policy, X-API-Key, 429 retry),
+   access                                     endpoint roots from apiHost, SiteResolver, version probe
+```
+
+- **The engine never sees HTTP, paths, envelopes or which API it talks to.** It calls a `Binding`
+  (`List`, `Get`, `Create`, `Replace`, `Delete`, `API()`), and the stored-id prefix comes from
+  `Binding.API()` (`official:`, `private:`), not from a constant. A binding never decides what to send;
+  it maps wire outcomes to domain outcomes (`gone`, `conflict`, `invalid{field}`).
+- **New domain facts, each implemented once in the engine as data:** `Kind.Shape = collection |
+  singleton`, `Kind.Variant = {field, value}`, and `Field.Merge = replace | leadingBlock`. No kind is
+  special-cased by name.
+- **Moves (mechanical, step 2):** `private/engine` → `engine`; `private/binding` → `binding/v2` +
+  `binding/classic`; the shared transport parts of `provider/transport.go` → `controller`;
+  `private/dispatch.go` → `dispatch`. `provider/pkg/private` keeps what is private: the overrides,
+  the private gen and the model checks. `internal/fakectl` moves beside the bindings it fakes.
+- **The surface file.** `private.json` becomes `surface.json`: every engine-served kind, tagged with
+  its `api`. At `PRIVATE=0` it holds only official engine kinds, generated from the public spec and
+  `mappings.yaml` (today: `AclRuleOrdering`); at `PRIVATE=1` the private kinds are added. The plugin
+  still embeds five files. `schema.merged.json` at `PRIVATE=0` stays byte-equal to the golden.
+- **The framework keeps its own client**, configured from the same config. Engine-served kinds get
+  `controller`'s 429 retry on both TLS paths; the documented caveat (the insecure path loses 429 retry)
+  remains for framework resources only.
+
+## S2.3 Official ACL rules: rename, aliases, required inputs, `index`
+
+| Item | Decision | Reason |
+|---|---|---|
+| Rename | `mappings.yaml` `entityPrefixes`: `/v1/sites/{siteId}/acl-rules: AclRule`. `traffic-matching-lists` keeps `TrafficMatch`. The existing `pass_token_rename` rewrites resources, the CRUD map and the auto-name map together. `descriptions:` keys move to `AclRuleIpv4`/`AclRuleMac`. | One editorial fact in the layer that is already data. The functions are already `getIpAclRule`/`getMacAclRule`/`listAclRules`. |
+| Aliases | New `mappings.yaml` section `aliases:` (`unifi:sites/v1:AclRuleIpv4: [unifi:sites/v1:TrafficMatchIpv4]`, and Mac). New deterministic pass `pass_aliases.go`, after the rename, sets `ResourceSpec.Aliases = [{type: <old>}]`. Loud errors: the new token is not a live resource; an alias equals a live token; two tokens share an alias. | Aliases are contract, so they sit in the golden beside the rename. `gen-sdk` emits `pulumi.Alias(type_=…)` into the generated `opts`; the engine resolves them before calling the plugin, which only ever sees the new token. |
+| Old class names | Removed. No deprecated duplicate token. | Two tokens on one CRUD path break the 1:1 rule of `TestCRUDMapKeysAreLiveTokens` and rule 3. Nothing is released (Phase 5). |
+| `networkIdFilter` | Generic gen fix: lift each `allOf` member's `required` list into the variant's `requiredInputs`. A unit test with a synthetic spec covers the mechanism; the golden shows every effect. Any other input it makes required stays only if the spec states it required, and gets its own Breaking bullet. | Probe a2: the server returns 400 "networkIdFilter must not be null"; today a program passes preview and fails at `up`. |
+| `index` | Output only on both resources, through a new `mappings.yaml` `outputOnly:` list (`token.property`, dead entries fail). Its description points to `AclRuleOrdering`. | It has no effect, and the ordering PUT renumbers it (probe a5). The rename already forces program edits, so removing it in the same change costs users nothing extra. |
+| Delta gate | `detectBreakingDelta` follows aliases: a base token missing from the current schema is compared with the current token that aliases it. A removal with no alias stays with the byte golden and `tokens.txt`. Unit test: a synthetic rename that also adds a required input is flagged. | Today it skips removed tokens, so the rename would hide `added-required-input AclRuleMac.networkIdFilter`. |
+| Acknowledgement | `CHANGELOG.md` `## [Unreleased]` `### Breaking`, three bullets: (1) the rename, state carried by aliases, Python class names changed; (2) `AclRuleMac.networkIdFilter` required; (3) `index` is no longer an input. Then `make schema` regenerates the golden and `tokens.txt`; `kinds.yaml` `officialTwins` for `acl-rules` names the new tokens. | The repo's existing mechanism (`TestNoUnacknowledgedBreakingDelta`); the private twin lint catches a stale twin token. |
+
+Probe facts kept as documented behaviour, not code: the official PUT replaces the whole rule and needs
+`type` (the framework already sends the full input set and the variant's const); a PUT may change MAC
+to IPV4 in place with the same id (out-of-band; a refresh shows it as drift of the variant's fields).
+
+## S2.4 Aliases: what migrates and how it is proven
+
+State migrates because the aliased old type, plus the unchanged name and parent, yields the old URN;
+the engine renames it in place, with no create or delete. Proven live in `make test-e2e` (§S2.11):
+`up` an `AclRuleIpv4`, `stack export`, rewrite its type and URN to `TrafficMatchIpv4`, `stack import`,
+then `preview --expect-no-changes` with the new program and an `up` that reports no create or delete.
+If it fails, the rename is held and the doc records `pulumi state` steps instead.
+
+## S2.5 `unifi:sites/v1:AclRuleOrdering`
+
+| Item | Decision | Reason |
+|---|---|---|
+| Schema source | `/acl-rules/ordering` **stays** in `excludedPaths` (pulschema would emit at most a data source). A new `mappings.yaml` section `singletons:` holds `{path, token, property: orderedAclRuleIds}`; a gen pass builds the `ResourceSpec` from the spec's own ordering body schema into the golden and writes the kind into `surface.json` (`api: official`, `shape: singleton`). Cross-checks: the path must be in `excludedPaths`; the token must not be in the framework CRUD map; `TestCRUDMapKeysAreLiveTokens` reads its "served outside the framework" set from `singletons:`. | Generated from the public spec, in the `PRIVATE=0` surface, with no hand-written schema. The same entry shape fits `firewall/policies/ordering` later. |
+| Inputs and outputs | Inputs: `orderedAclRuleIds: string[]` (official rule ids, `merge: leadingBlock`), `unlisted: LAST \| REJECT` (default `LAST`), `siteId` (replace on change, like every resource). Output: `effectiveOrder: string[]` (the full live order). | Users list the rules they manage; Pulumi's dependency graph then orders operations: rules are created before the ordering; a rule removed from the program is first dropped from the ordering (it lands in the unmanaged tail), then deleted. |
+| Contract | The listed rules form the **leading block** of the site's order, in the declared order. Unlisted rules follow in their current relative order (`LAST`). `REJECT` fails the update and names every unlisted rule. | Decision 2: first match wins, so the program's rules must take precedence; this is also the only order a program can own without owning other people's rules. |
+| Identity | One per site. Stored id `official:<siteUUID>`. Import id: the site's name or UUID. | Rule 3: a stored id names its API; a singleton's natural key is its site. |
+| Create | Adopt: GET the live order, compose, PUT. Never fails because rules exist. | Nothing can be created. |
+| Compose (wire) | PUT body = the managed ids, then every other live id in live relative order. Duplicate or `private:` ids fail Check (the latter names the private kind's `aclRuleId` output). An id that is not live passes Check; the PUT's 400 `invalid-reference` is shown verbatim. On 400 `not-all-acl-rules-specified` the engine re-reads once and retries, then fails. | Probe a5/d2: the PUT must list every user-defined rule, including unmanaged and private-created ones. One retry covers a rule created elsewhere between GET and PUT. |
+| Read and Diff | Projected input = the first *n* live ids, *n* = the number of managed ids. Drift shows when an unmanaged rule moves ahead of a managed one, when managed rules are reordered, or when a managed id is gone. Diff is element-wise; any change is an in-place update. | Rule 1 for a list whose position is managed. A private create can leave a duplicate `acl_index` (probe d2); that never shows here, because the official GET returns an order, not indices. |
+| Delete | Release: no call, the live order stays, a warning is logged. | There is no "unordered" state, and a reset would reorder other people's rules. |
+
+## S2.6 Controller access and the authenticated edge (slice 2a)
+
+| Item | Decision | Reason |
+|---|---|---|
+| Auth | One `apiKey`, sent as `X-API-Key`, for official, v2 and classic calls. No login, no cookie, no CSRF token. | Probe b2-b4: key-only writes succeed through the edge; no `Set-Cookie`, no `X-Csrf-Token`; no or a wrong key → 401 everywhere. Frame: "a login only if refused". |
+| Roots | From `apiHost`: `https://<apiHost>/proxy/network/integration/v1`, `…/proxy/network/v2/api/site/{name}`, `…/proxy/network/api/s/{name}`. | The edge serves all three. |
+| `networkBaseUrl` | Stays an override of the Network root only (direct `:8081`, pre-wizard), private fragment only, so the golden is unchanged. Its default is the edge. The "private kinds without a key" path in `Configure` stays, documented as pre-wizard only. | Probe b5: after the wizard `:8081` answers 401; the edge is the product path. The override keeps the seedless tier. |
+| Site | `siteId` takes the site name or UUID. `controller.SiteResolver` resolves lazily: no call when the form given is the form needed; otherwise one `GET /integration/v1/sites` (`internalReference` = name, `id` = UUID), cached. When `siteId` is a name, the dispatcher forwards the UUID to the framework. With no key, it falls back to slice-1 behaviour (siteId used as given). | Frame §2 Site row; probe a1/e. A name on official paths fails today, so forwarding the UUID is additive; a UUID-configured stack (and the Prism mock) makes no extra call. |
+| Version guard | On the first private-kind call, `GET …/api/s/{name}/stat/sysinfo` and compare the Network version with the pin's `networkVersion`. A mismatch fails the private kinds only, with both versions in the message. Official kinds are not guarded. | Frame: one controller version per release; verifiable now (probe b3). |
+| Secrets | The key is never logged. Model fields marked sensitive, and every classic `x_` field, are secret, failing closed. | Probe f2: `mgmt` returns `x_` credentials in plain text. |
+
+## S2.7 `unifi:network:AclRuleIpv6` and the G-Q4 variant exception (slice 2d)
+
+**Exception text (to be added to the frame and kept here):**
+> **G-Q4 variant exception.** Kinds are served whole, with one exception. When the official API serves
+> some variants of a discriminated kind and not another, that variant alone may be served by the
+> private API as its own token, provided that: (1) the discriminator is pinned (`variant:`) and is
+> enforced on write, list and read; (2) objects of both APIs share one id namespace for relations
+> between kinds, and the private token outputs that id; (3) generation fails once any official token
+> serves the variant value, and the kind then moves to the official API with an alias. First and only
+> use: ACL rules of `type: IPV6` (the official API serves IPV4 and MAC).
+
+| Item | Decision | Reason |
+|---|---|---|
+| Token and ids | `unifi:network:AclRuleIpv6`. Natural key `[name]`. Stored id `private:<_id>`. Output `aclRuleId` = `external_id` = the official rule id. | Probe e: official id = private `external_id`. `aclRuleId` is what `AclRuleOrdering` takes. |
+| `kinds.yaml` | `expose: {kind: acl-rules, token: AclRuleIpv6, naturalKey: [name], variant: {field: type, value: IPV6}, servedFrom: <networkVersion>, source: …}`; `officialTwins` `acl-rules` gains `officialVariants: {field: type, values: [IPV4, MAC]}`; new section `createDefaults: {kind: acl-rules, fields: {acl_index: 0}}` (sent on create only, then never managed); `implicitRequired` for the traffic source and destination endpoints, each with `source: "slice 2 probe c1"`. | The model's `type` is a plain enum, not a polymorph, so the variant is a field pin. `acl_index` is required on create (probe c1) but its position is owned by `AclRuleOrdering`. |
+| Gen checks | Exposing an official twin is a gen error unless the entry has `variant:`, its value is in the field's enum, and it is not in `officialVariants`; and the golden's twin tokens' discriminator consts (IPV4, MAC) must equal `officialVariants`. A new official IPV6 variant therefore fails gen. The kind is generated into the schema only when the pin's `networkVersion` ≥ `servedFrom`; with `servedFrom` absent it is not served and gen prints `NOT SERVED (servedFrom unset)`. | The exception enforces itself, and ends itself when the official API catches up. |
+| Schema | `type` is not an input; `acl_index` is output only; the discriminator is create-only. | The binding owns them. |
+| Engine | Create and PUT bodies carry `type: IPV6`; create adds `createDefaults`; update keeps the live `acl_index` (rule 2 merge onto a fresh read). List and natural-key lookup keep only `type == IPV6`. Read by id searches the **unfiltered** list, then checks the variant: a rule whose `type` changed is a loud error naming the official token that now serves it, never "gone". | Probe a3: the official PUT can change a rule's type in place; "gone" would make Pulumi create a duplicate in a first-match list. |
+| On 10.4.57 | **Not served.** `servedFrom` stays unset until a probe measures a Network version that accepts IPv6 ACL rules. | Probe c1: create, or a PUT to IPV6, returns 500 "IPv6 ACL is not supported yet"; an IPv6 subnet fails validation. Shipping a token whose every create fails is worse than not shipping it. |
+| Unblocking | Step 6a (§S2.12) probes UniFi OS Server 5.1.42 / Network 10.5.67: IPv6 create, read, update, delete, and whether official list and ordering include an IPv6 rule (if ordering omits it, or refuses PUTs while one exists, that is recorded and `AclRuleOrdering` documents it). If it works, serving needs a pin bump (official spec, golden, private model, seed): an **owner decision**, done as its own step. | The two pins are tied (§4); a bump moves the whole contract. |
+
+## S2.8 Classic kinds and the settings singleton (slice 2c)
+
+| Item | Decision | Reason |
+|---|---|---|
+| Binding semantics (`binding/classic`) | `{meta,data}` envelope; create answers 200 with `data:[obj]`; GET answering 200 with `data:[]` is gone; an `rc:"error"` body becomes a typed error with `msg` and `validationError{field,pattern}`; a DELETE answering 400 `api.err.IdInvalid` is gone only after a list confirms the id is absent; a 5xx becomes a short error with the server's message. The engine still sends its merged full body, though the server merges a PUT. | Probe f1/f2. Wire semantics stay out of the engine. Confirming IdInvalid by list keeps a malformed id from passing as success. |
+| Natural-key uniqueness | Generic engine rule for collection kinds: Create lists by natural key first and fails with "already exists; import it (id …)" on a match. | The classic API accepts duplicate names (probe f1), which would silently break rule 3. It is also correct for v2 kinds. |
+| First kind | `unifi:network:UserGroup` (`rest/usergroup`), natural key `[name]`. `qos_rate_max_*` uses `-1` for "off", recorded as a `defaults:` entry with `source: live`. | Full CRUD measured (probe f1); no device needed. |
+| Settings singleton | `unifi:network:SettingNtp` (`rest/setting/ntp/{_id}`), `shape: singleton`, keyed by the setting's `key` in the site. Create adopts (GET the one document, merge the managed fields, PUT); Delete releases with a warning (the §S2.5 lifecycle, unchanged). A dropped managed field resets to its default on update (G-Q1). Stored id `private:<_id>`; import id `ntp` or `private:<_id>`. | Probe f2: merge PUT, bad-enum 400, restore by re-read; no secrets in the section. Reusing the singleton shape proves it is not tied to ordering. |
+| Secrets lint | Gen fails if an exposed classic kind has an `x_` field that is not secret. `mgmt` is not exposed in slice 2. | Probe f2. |
+
+## S2.9 Stored ids and tokens, summarized
+
+| Token | Served by | Stored id | Import id |
+|---|---|---|---|
+| `unifi:sites/v1:AclRuleIpv4`, `AclRuleMac` | framework (official) | rule UUID (unchanged) | rule UUID |
+| `unifi:sites/v1:AclRuleOrdering` | engine, `binding/official` | `official:<siteUUID>` | site name or UUID |
+| `unifi:network:AclRuleIpv6` (when served) | engine, `binding/v2` | `private:<_id>` | `private:<_id>` or `name` |
+| `unifi:network:UserGroup` | engine, `binding/classic` | `private:<_id>` | `private:<_id>` or `name` |
+| `unifi:network:SettingNtp` | engine, `binding/classic` | `private:<_id>` | `ntp` or `private:<_id>` |
+
+Accepted until the frame's step-5 contract rebase: the module split (`sites/v1` vs `network`) and the
+framework resources' unprefixed stored ids.
+
+## S2.10 Live harness (slice 2b)
+
+| Item | Decision | Reason |
+|---|---|---|
+| Image | Tier 2 keeps the pinned `hieutq/unifi-os-server@sha256:3e88…` with the committed seed. Pull from Docker Hub, else `mirror.gcr.io/hieutq/unifi-os-server@<same digest>`. If both fail, a local rebuild from `uosserver:uos-5.1.15-04c8e401eb34` plus our own entrypoint layer is allowed for the local tier, and the run log says so. | Its layers are Ubiquiti's 5.1.15 layers (identical diff_ids) plus one entrypoint layer, so the model and the target are one version. |
+| Shared harness | `test/live/` (shell + our own helpers): restore the seed, boot, edge setup, readiness gate, teardown. `test/e2e/run.sh` uses it. `restore.sh` untars with the UniFi OS image's own `tar` instead of `alpine:3`. | One boot recipe; no extra image pull. |
+| Sandbox workarounds | `E2E_SANDBOX=auto` (default; `0`/`1` override) turns them on when `/proc/net/if_inet6` is absent: a compose override with `privileged: true` and `extra_hosts: host.docker.internal:127.0.0.1`; a committed ~10-line discovery stub (our JavaScript, `os.networkInterfaces()` on `127.0.0.1:11002`) run with the image's node, then a unifi-core restart; a loop that deletes `listen [::]` lines and runs `nginx -s reload` (never a systemd restart of nginx, whose ExecStartPre wipes unifi-core's site configs), removing a stale `uos-internal.sock` if reload cannot bind. | The probe's measured recipe, moved from hand steps into the harness; off on a normal host. |
+| Targets | `make test-e2e`: the existing gRPC test (DnsARecord) plus a new CLI driver (Pulumi CLI 3.230.0, `PRIVATE=0` SDK) for the ACL rules, ordering and alias migration. New `make test-e2e-edge`: `PRIVATE=1` plugin and SDK, the `test/e2e-private` driver in an edge mode on the seeded controller. New `make test-live`: one boot, runs both. `make test-e2e-private` is **unchanged**: pre-wizard, `:8081`, no key. | A boot takes minutes, so one boot serves both drivers. The pre-wizard tier is the slice-1 regression and the only tier that needs no seed (useful at a pin bump). |
+| Edge mode config | `apiHost=127.0.0.1:11443`, `allowInsecure=true`, `networkBaseUrl` unset, the site name `default`. The key is read from `test/e2e/seed.env` into the process environment as `UNIFI_APIKEY` only: never on a command line, in Pulumi config, in logs or in the run log. | Hard constraint on the key. |
+
+## S2.11 Test plan
+
+| Gate | New coverage | Kind |
+|---|---|---|
+| `make test` | alias pass (set; dead; collision; alias = live token); `allOf` required lift (synthetic spec); `outputOnly:` (dead entry fails); `singletons:` cross-checks; CRUD-map test's outside set; alias-aware `detectBreakingDelta` (synthetic rename + added required input flagged); engine tables for singleton adopt/release, `leadingBlock` compose and projection (`LAST`, `REJECT`, missing id, duplicate, `private:` id rejected, one retry on not-all-specified), variant pin (create/PUT injection, filtered list, changed-variant read error), natural-key uniqueness; `fakectl` gains an official ACL rules + ordering surface with its 400 rules and a classic envelope (`data:[]`, `rc:error`, IdInvalid); controller client (key header, 429 retry on both TLS paths), `SiteResolver` (UUID↔name, lazy, no-key fallback), version guard; `kinds.yaml` `variant`/`officialVariants`/`servedFrom`/`createDefaults`/`singleton` parsing and gen rules (twin without `variant` fails; officially served value fails); `x_` secret lint; `TestNoUbiquitiArtifacts`. | mocked, synthetic |
+| `make schema-check` / `schema-delta` | Golden regenerated once (rename, aliases, `networkIdFilter` required, `index` output only, `AclRuleOrdering`); `tokens.txt`; ContractLint. With `CONTRACT_BASE_SCHEMA` = main, the delta passes only with the Breaking bullets. | golden |
+| Determinism | `make generate` twice with CLI 3.230.0, `diff -r sdk`; new passes iterate sorted keys; `surface.json` at `PRIVATE=0` is a pure function of the spec and `mappings.yaml`. | generated |
+| `make test-sdk` | `AclRuleIpv4`, `AclRuleMac`, `AclRuleOrdering` import; `TrafficMatchIpv4` does not; the generated source holds `Alias(type_="unifi:sites/v1:TrafficMatchIpv4")`. At `PRIVATE=1`: `network.UserGroup`, `network.SettingNtp` (and `AclRuleIpv6` only when served). | generated |
+| `make test-mock` | Prism: create/update/delete for `AclRuleIpv4`/`AclRuleMac` under the new tokens; ordering GET/PUT through dispatcher → engine → `binding/official` (wire and shape only; Prism keeps no state). | Prism |
+| `make private-check` | New `digests.txt` and private `tokens.txt` entries; the variant entry resolves against the model; extract-twice determinism. | installer |
+| `make test-e2e-private` | Unchanged, must stay green. | live, pre-wizard |
+| `make test-e2e` | **AclRuleIpv4** and **AclRuleMac** (with `networkIdFilter` = the seed network's UUID, listed at run time): create, refresh + `preview --expect-no-changes`, update (including clearing a filter, which proves the full PUT), delete with nothing left. **AclRuleOrdering**: adopt on [r2, r1] (a raw GET shows them leading), no-op, reorder to [r1, r2], an unmanaged rule created raw is kept in the tail, an out-of-band move of an unmanaged rule ahead shows as drift, a v2-created IPV4 rule stays included, destroy releases (order left as is). No drift on the rules after an ordering PUT (`index` is output only). **Alias migration** as in §S2.4. | live, seed |
+| `make test-e2e-edge` | The 4 slice-1 kinds through the edge with the key, all 6 driver steps. **UserGroup**: create, refresh no-op, unmanaged drift kept, managed drift shown, duplicate name refused, import by name, destroy. **SettingNtp**: adopt, change one field, no-op, drift, drop-reset, destroy = release, then the harness restores the original values and checks by re-read. **AclRuleIpv6**: only on a pin where it is served; on 10.4.57 not_run. | live, seed |
+
+Every gate that cannot run is reported not_run with the reason.
+
+## S2.12 Build order (every gate green after each step)
+
+1. **Official ACL rules.** Rename, `aliases:` pass, `allOf` lift, `outputOnly:` for `index`,
+   alias-aware delta detector, CHANGELOG bullets, golden and `tokens.txt`, `officialTwins` tokens.
+   `test/live/` with the sandbox workarounds; `test-e2e` gains the CLI driver with the ACL rule
+   round trips and the alias migration. Gates: all, plus `test-e2e`.
+2. **Layer move, no behaviour change.** `engine`, `binding/{v2,classic}`, `controller`, `dispatch`;
+   `private.json` → `surface.json`; stored-id prefix from `Binding.API()`; `controller`'s 429 retry.
+   Gates: all; `test-e2e-private` is the regression proof.
+3. **Ordering.** `Kind.Shape`, `Field.Merge = leadingBlock`, `binding/official`, `singletons:` gen
+   pass, `SiteResolver`, `AclRuleOrdering`; live ordering in `test-e2e`. Gates: all, plus `test-e2e`.
+4. **Edge and the seeded tier.** v2 binding through `controller` at the edge; version guard;
+   `test-e2e-edge` and `test-live`; the 4 slice-1 kinds post-wizard. Gates: all, plus `test-e2e`,
+   `test-e2e-edge`.
+5. **Classic.** `binding/classic` semantics, natural-key uniqueness, `UserGroup`, `SettingNtp`,
+   `x_` lint. Gates: as step 4.
+6. **IPv6.** (a) Probe 5.1.42 (docs only). (b) `variant`/`officialVariants`/`servedFrom`/
+   `createDefaults`, the gen rules, the engine variant pin, `AclRuleIpv6` Tier-1 tested; the G-Q4
+   exception text in the frame. With this, slice 2 is built. (c) Serving it live: `servedFrom` set to
+   the first accepting version measured in (a), which needs the owner-approved pin bump; then the
+   live IPv6 round trip and its ordering interplay in `test-e2e-edge`.
+
+## S2.13 Risks
+
+| Risk | Mitigation |
+|---|---|
+| IPv6 is refused on the pin (probe c1) | Built and Tier-1 tested, not served; probe 5.1.42; serving needs an owner-approved pin bump; live IPv6 reported not_run until then. |
+| Official ordering may omit IPv6 rules, or refuse PUTs while one exists | Measured in step 6a before serving; documented on `AclRuleOrdering`. |
+| The alias does not migrate | Live test in step 1; on failure the rename is held and `pulumi state` steps are documented. |
+| The `allOf` lift makes other inputs required | Golden diff reviewed; kept only where the spec requires it; one Breaking bullet each. |
+| The program's leading block fights other tools that reorder rules | By design; drift on refresh; `REJECT` for strict users. |
+| A rule is created elsewhere between ordering GET and PUT | One re-read and retry, then a clear error. |
+| The variant changes out of band | Loud error, never "gone", so no duplicate rule. |
+| The layer move touches slice-1 code | Its own step with no behaviour change; engine tests and `test-e2e-private` stay green. |
+| Natural-key uniqueness costs a list per create | One GET per create; accepted for rule 3. |
+| Sandbox workarounds hide real host behaviour | Detection-gated, off on a host with IPv6; a run on a normal host is not_run until someone has one. |
+| Docker Hub 429 | Mirror with the same digest; local rebuild allowed for the local tier and stated in the run log. |
+| Licence | Unchanged position (§9): only our code, counts, names, summaries and hashes; `TestNoUbiquitiArtifacts`; the key is read at run time and never written anywhere. |
+
+## S2.14 Deviations recorded during implementation
+
+Filled in as each step of §S2.12 is built and measured, in the format of §14.
+
+| # | Design said | Implementation | Why |
+|---|---|---|---|
+| — | — | — | — |
