@@ -151,6 +151,51 @@ Integration API at **exactly** that path on `:11443`. So pointing the provider a
 The tests are env-gated: without `UNIFI_E2E_ADDR` they **skip**, so a bare
 `go test -tags e2e ./...` (the compile check) needs no controller.
 
+### The Pulumi CLI driver (`test/e2e/cli`, `//go:build e2e_cli`)
+
+After the gRPC tests, `run.sh` installs the PRIVATE=0 Python SDK into
+`build/e2e/venv` and drives the **pinned Pulumi CLI** (3.230.0; pass
+`PULUMI=<path>`) over `cli/program` against the same controller, checking every
+step with raw HTTP against the official API (docs/design/private-binding.md
+§S2.11):
+
+1. **create** an `AclRuleIpv4` and an `AclRuleMac` (its `networkIdFilter` is the
+   seed network's UUID, listed at run time) and an `AclRuleOrdering` of `[r2, r1]`;
+2. **no-op**: refresh, `preview --expect-no-changes`, `up --expect-no-changes`;
+3. **update** in place: r1 changes its action and drops `protocolFilter` (the
+   official PUT replaces the whole rule, so the filter is gone), r2 is renamed,
+   the order becomes `[r1, r2]`; then no drift (the ordering PUT renumbers
+   `index`, which is output only);
+4. **unmanaged rules kept**: a rule created with the official API and one created
+   with the private v2 API land in the tail; a reorder sends them too;
+5. **drift**: an out-of-band move of an unmanaged rule ahead of the managed block
+   shows as one update of the ordering, and `up --refresh` restores it;
+6. **import** the ordering by site name (`default`): stored id `official:<site UUID>`;
+7. **destroy**: both rules gone; the ordering is released (the remaining order is
+   left as is);
+8. **alias migration**: a stack whose state holds the former token
+   `TrafficMatchIpv4` (built, exported, rewritten, imported) previews with no
+   changes under `AclRuleIpv4`, and `up` moves the state to the new token with no
+   create, delete or replace; the rule keeps its id.
+
+The key is read from `seed.env` into the environment (`UNIFI_APIKEY`) only: never
+on a command line, in Pulumi config or in the transcript.
+
+### Sandbox workarounds (`test/live/`)
+
+The boot recipe is the shared harness [`test/live/lib.sh`](../live/lib.sh). On a
+kernel without IPv6 (`E2E_SANDBOX=auto`, the default; `1`/`0` force it) it:
+runs the container privileged (a sandbox may lack `CAP_SYS_RESOURCE`) with
+`host.docker.internal` pointing at the container; starts our own
+[discovery stub](../live/discovery-stub.js) with the image's node (unifi-core asks
+a host-side agent for the LAN interfaces and otherwise never writes its nginx
+site configs); and strips the `listen [::]` lines unifi-core writes, reloading
+nginx (never restarting it: the unit's pre-start wipes those configs) and removing
+a stale `uos-internal.sock` when nginx does not come up on :443. A normal host
+needs none of this. The seed is untarred with the UniFi OS image's own `tar`. The
+image is the pinned digest from Docker Hub, else `mirror.gcr.io` with the same
+digest; the run log says which.
+
 ## TLS
 
 UniFi OS serves its **own self-signed cert** on the edge. The tests trust it via

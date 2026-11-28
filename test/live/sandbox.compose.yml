@@ -1,0 +1,13 @@
+# Sandbox override for the live tiers (docs/design/private-binding.md §S2.10),
+# merged over test/e2e/docker-compose.yml only when E2E_SANDBOX is on (the
+# default `auto` turns it on when the kernel has no IPv6). A sandbox may lack
+# capabilities in the cap_add list (CAP_SYS_RESOURCE), so the container runs
+# privileged instead; host.docker.internal points at the container itself, where
+# test/live/discovery-stub.js answers. A normal host needs neither.
+services:
+  uos:
+    privileged: true
+    cap_drop: !reset []
+    cap_add: !reset []
+    extra_hosts:
+      - "host.docker.internal:127.0.0.1"
